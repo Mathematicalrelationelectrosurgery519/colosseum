@@ -1,0 +1,20 @@
+import SwiftUI
+
+enum ColosseumTheme {
+    static let canvas = Color(red: 0.04, green: 0.04, blue: 0.04)
+    static let surface = Color(red: 0.10, green: 0.10, blue: 0.10)
+    static let elevated = Color(red: 0.14, green: 0.14, blue: 0.14)
+    static let border = Color.white.opacity(0.12)
+    static let primaryText = Color.white
+    static let secondaryText = Color.white.opacity(0.55)
+    static let tertiaryText = Color.white.opacity(0.35)
+    static let gridGap: CGFloat = 16
+    static let cellMin: CGFloat = 180
+    static let sidebarWidth: CGFloat = 320
+}
+
+extension View {
+    func colosseumCanvas() -> some View {
+        self.background(ColosseumTheme.canvas.ignoresSafeArea())
+    }
+}
