@@ -97,6 +97,14 @@ struct ColosseumApp: App {
                 .keyboardShortcut("1", modifiers: .command)
             }
         }
+
+        MenuBarExtra {
+            MenuBarCaptureView()
+                .modelContainer(container)
+        } label: {
+            Label("Colosseum Capture", systemImage: "plus.square.on.square")
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
