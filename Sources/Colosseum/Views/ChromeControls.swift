@@ -291,7 +291,7 @@ struct AppHomeButton: View {
     var body: some View {
         Button(action: action) {
             Group {
-                if let image = Bundle.module.image(forResource: "AppIconMark") {
+                if let image = Bundle.module.image(forResource: "AppIcon") {
                     Image(nsImage: image)
                         .resizable()
                         .interpolation(.high)
