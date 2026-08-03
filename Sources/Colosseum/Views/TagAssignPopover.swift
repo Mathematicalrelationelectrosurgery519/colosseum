@@ -39,22 +39,6 @@ struct TagAssignPopover: View {
                     }
                 }
             }
-
-            HStack(spacing: 10) {
-                ShortcutHint(text: "↑↓")
-                Text("move")
-                    .font(.system(size: 10))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-                ShortcutHint(text: "↩")
-                Text("toggle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-                ShortcutHint(text: "esc")
-                Text("done")
-                    .font(.system(size: 10))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-            }
-            .padding(.top, 2)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
