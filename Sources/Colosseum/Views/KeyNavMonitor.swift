@@ -11,6 +11,9 @@ final class KeyNavMonitor {
     /// Return true to consume Tab.
     var onTab: (() -> Bool)?
     var onEscape: (() -> Void)?
+    var onDelete: (() -> Void)?
+    /// Control/Command+Z. Return true to consume.
+    var onUndo: (() -> Bool)?
     /// Unmodified character keys (lowercase). Return true to consume the event.
     var onCharacter: ((String) -> Bool)?
     /// When true, arrow / enter keys are left alone (e.g. text caret movement).
@@ -70,11 +73,24 @@ final class KeyNavMonitor {
                     return nil
                 }
                 return event
+            case 51, 117: // delete / forward delete
+                if let onDelete = self.onDelete {
+                    DispatchQueue.main.async { onDelete() }
+                    return nil
+                }
+                return event
             case 53: // escape
                 DispatchQueue.main.async { self.onEscape?() }
                 return nil
             default:
                 let mods = event.modifierFlags.intersection([.command, .option, .control])
+                if (mods.contains(.control) || mods.contains(.command)),
+                   !mods.contains(.shift),
+                   event.charactersIgnoringModifiers?.lowercased() == "z",
+                   let onUndo = self.onUndo,
+                   onUndo() {
+                    return nil
+                }
                 if mods.isEmpty,
                    let chars = event.charactersIgnoringModifiers?.lowercased(),
                    chars.count == 1,

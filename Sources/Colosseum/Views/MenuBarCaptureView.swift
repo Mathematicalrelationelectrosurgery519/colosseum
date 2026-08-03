@@ -11,10 +11,12 @@ struct MenuBarCaptureView: View {
     @State private var notes = ""
     @State private var draft: CaptureDraft?
     @State private var selectedBoardIndex = 0
+    @State private var selectedBoardID: UUID?
     @State private var successBoardTitle = ""
     @State private var errorMessage: String?
     @State private var keyMonitor = KeyNavMonitor()
     @State private var pasteMonitor: Any?
+    @State private var panelWindow: NSWindow?
 
     @FocusState private var focus: FocusTarget?
 
@@ -26,26 +28,37 @@ struct MenuBarCaptureView: View {
     private enum Phase: Equatable {
         case idle
         case resolving
-        case confirm
+        case selectBoard
+        case notes
         case committing
         case success
     }
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsPreview {
+                previewHeader
+                    .padding(12)
+                Divider().overlay(ColosseumTheme.border)
+            }
+
             switch phase {
             case .idle, .resolving:
-                idlePhase
-            case .confirm, .committing:
-                confirmPhase
+                idleBody
+            case .selectBoard:
+                boardSelectBody
+            case .notes, .committing:
+                notesBody
             case .success:
-                successPhase
+                successBody
             }
         }
-        .frame(width: 360, height: 420)
+        .frame(width: 300)
+        .fixedSize(horizontal: false, vertical: true)
         .background(ColosseumTheme.canvas)
         .preferredColorScheme(.dark)
         .onAppear {
+            panelWindow = NSApp.keyWindow
             installKeys()
             installPasteMonitor()
             focusInput()
@@ -57,14 +70,19 @@ struct MenuBarCaptureView: View {
         }
     }
 
-    // MARK: - Phases
+    private var showsPreview: Bool {
+        switch phase {
+        case .selectBoard, .notes, .committing:
+            return draft != nil
+        default:
+            return false
+        }
+    }
 
-    private var idlePhase: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Capture")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(ColosseumTheme.primaryText)
+    // MARK: - Phase bodies
 
+    private var idleBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
             TextField("Paste URL or media…", text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
@@ -77,16 +95,10 @@ struct MenuBarCaptureView: View {
                 .onSubmit { Task { await resolveFromInput() } }
                 .disabled(phase == .resolving)
 
-            HStack(spacing: 8) {
-                ShortcutHint(text: "⌘V")
-                Text("paste")
+            if phase == .resolving {
+                Text("Resolving…")
                     .font(.system(size: 11))
                     .foregroundStyle(ColosseumTheme.tertiaryText)
-                ShortcutHint(text: "↩")
-                Text(phase == .resolving ? "resolving…" : "preview")
-                    .font(.system(size: 11))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-                Spacer()
             }
 
             if let errorMessage {
@@ -94,114 +106,89 @@ struct MenuBarCaptureView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
             }
-
-            Spacer()
         }
-        .padding(16)
-        .onPasteCommand(of: [.url, .plainText, .png, .tiff, .jpeg, .fileURL]) { _ in
-            Task { await resolveFromPasteboard() }
-        }
+        .padding(12)
     }
 
-    private var confirmPhase: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            previewHeader
-                .padding(16)
-
-            Divider().overlay(ColosseumTheme.border)
-
+    private var boardSelectBody: some View {
+        Group {
             if boards.isEmpty {
                 Text("No boards yet")
                     .font(.system(size: 12))
                     .foregroundStyle(ColosseumTheme.tertiaryText)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(12)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(boards.enumerated()), id: \.element.id) { index, board in
-                                boardRow(board, index: index)
-                                    .id(board.id)
-                            }
-                        }
-                    }
-                    .onChange(of: selectedBoardIndex) { _, newValue in
-                        guard boards.indices.contains(newValue) else { return }
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            proxy.scrollTo(boards[newValue].id, anchor: .center)
-                        }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(boards.enumerated()), id: \.element.id) { index, board in
+                        boardRow(board, index: index)
                     }
                 }
             }
-
-            Divider().overlay(ColosseumTheme.border)
-
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("Notes (optional)", text: $notes)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(ColosseumTheme.primaryText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(ColosseumTheme.surface)
-                    .overlay(Rectangle().stroke(
-                        focus == .notes ? ColosseumTheme.primaryText.opacity(0.35) : ColosseumTheme.border,
-                        lineWidth: 1
-                    ))
-                    .focused($focus, equals: .notes)
-                    .onSubmit { Task { await commitSelected() } }
-                    .disabled(phase == .committing)
-
-                HStack(spacing: 8) {
-                    ShortcutHint(text: "↑↓")
-                    Text("board")
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                    ShortcutHint(text: "⇥")
-                    Text("notes")
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                    ShortcutHint(text: "↩")
-                    Text(phase == .committing ? "adding…" : "add")
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                    Spacer()
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.red)
-                }
-            }
-            .padding(16)
         }
     }
 
-    private var successPhase: some View {
-        VStack(spacing: 10) {
-            Spacer()
+    private var notesBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let board = selectedBoard {
+                Text(board.title)
+                    .font(.system(size: 11))
+                    .foregroundStyle(ColosseumTheme.tertiaryText)
+            }
+
+            TextField("Notes (optional)", text: $notes)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(ColosseumTheme.primaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(ColosseumTheme.surface)
+                .overlay(Rectangle().stroke(
+                    focus == .notes ? ColosseumTheme.primaryText.opacity(0.35) : ColosseumTheme.border,
+                    lineWidth: 1
+                ))
+                .focused($focus, equals: .notes)
+                .onSubmit { Task { await commitSelected() } }
+                .disabled(phase == .committing)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(12)
+    }
+
+    private var successBody: some View {
+        HStack(spacing: 8) {
             Image(systemName: "checkmark")
-                .font(.system(size: 28, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ColosseumTheme.primaryText)
             Text("Added to \(successBoardTitle)")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ColosseumTheme.secondaryText)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-            Spacer()
+                .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Subviews
+
+    private var selectedBoard: Board? {
+        if let selectedBoardID {
+            return boards.first(where: { $0.id == selectedBoardID })
+        }
+        guard boards.indices.contains(selectedBoardIndex) else { return nil }
+        return boards[selectedBoardIndex]
+    }
 
     @ViewBuilder
     private var previewHeader: some View {
         if let draft {
             HStack(alignment: .top, spacing: 12) {
                 previewThumbnail(for: draft)
-                    .frame(width: 72, height: 72)
+                    .frame(width: 56, height: 56)
                     .clipped()
                     .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
 
@@ -235,17 +222,17 @@ struct MenuBarCaptureView: View {
             ZStack {
                 ColosseumTheme.surface
                 Image(systemName: symbolName(for: draft.kind))
-                    .font(.system(size: 22, weight: .light))
+                    .font(.system(size: 18, weight: .light))
                     .foregroundStyle(ColosseumTheme.tertiaryText)
             }
         }
     }
 
     private func boardRow(_ board: Board, index: Int) -> some View {
-        let selected = index == selectedBoardIndex && focus != .notes
+        let selected = index == selectedBoardIndex
         return Button {
             selectedBoardIndex = index
-            focus = nil
+            advanceToNotes()
         } label: {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -258,14 +245,9 @@ struct MenuBarCaptureView: View {
                         .foregroundStyle(ColosseumTheme.tertiaryText)
                 }
                 Spacer()
-                if selected {
-                    Image(systemName: "return")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .background(selected ? ColosseumTheme.elevated : Color.clear)
             .contentShape(Rectangle())
         }
@@ -290,56 +272,80 @@ struct MenuBarCaptureView: View {
         }
     }
 
+    private func focusNotes() {
+        DispatchQueue.main.async {
+            focus = .notes
+        }
+    }
+
     private func installKeys() {
         keyMonitor.onUp = {
-            guard phase == .confirm, focus != .notes, !boards.isEmpty else { return }
+            guard phase == .selectBoard, !boards.isEmpty else { return }
             selectedBoardIndex = max(0, selectedBoardIndex - 1)
         }
         keyMonitor.onDown = {
-            guard phase == .confirm, focus != .notes, !boards.isEmpty else { return }
+            guard phase == .selectBoard, !boards.isEmpty else { return }
             selectedBoardIndex = min(boards.count - 1, selectedBoardIndex + 1)
         }
         keyMonitor.onEnter = {
             switch phase {
             case .idle:
                 Task { await resolveFromInput() }
-            case .confirm:
+            case .selectBoard:
+                advanceToNotes()
+            case .notes:
                 Task { await commitSelected() }
             default:
                 break
             }
         }
-        keyMonitor.onTab = {
-            guard phase == .confirm else { return false }
-            focus = .notes
-            return true
-        }
+        keyMonitor.onTab = { false }
         keyMonitor.onEscape = {
-            switch phase {
-            case .confirm, .resolving:
-                resetToIdle(clearError: true)
-                focusInput()
-            case .idle, .success, .committing:
-                resetToIdle(clearError: true)
-            }
+            handleEscape()
         }
         keyMonitor.shouldIgnoreNavigation = {
-            phase != .confirm && phase != .idle
+            switch phase {
+            case .idle, .selectBoard, .notes: return false
+            default: return true
+            }
         }
         keyMonitor.install()
     }
 
+    private func handleEscape() {
+        dismissPanel()
+    }
+
+    private func dismissPanel() {
+        resetToIdle(clearError: true)
+        let window = panelWindow ?? NSApp.keyWindow
+        DispatchQueue.main.async {
+            window?.orderOut(nil)
+        }
+    }
+
+    /// Intercept ⌘V while the panel is open so the app's "Paste into Board" menu shortcut
+    /// doesn't steal it from the capture fields.
     private func installPasteMonitor() {
         removePasteMonitor()
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let isPaste = event.modifierFlags.contains(.command)
+            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            let isPaste = flags == .command
                 && event.charactersIgnoringModifiers?.lowercased() == "v"
-            guard isPaste, phase == .idle || phase == .resolving else { return event }
-            if pasteboardHasNonTextMedia() {
-                Task { await resolveFromPasteboard() }
+            guard isPaste else { return event }
+
+            switch phase {
+            case .idle, .resolving:
+                Task { await handleIdlePaste() }
+                return nil
+            case .notes:
+                if let string = NSPasteboard.general.string(forType: .string) {
+                    notes = string
+                }
+                return nil
+            case .selectBoard, .committing, .success:
                 return nil
             }
-            return event
         }
     }
 
@@ -350,22 +356,52 @@ struct MenuBarCaptureView: View {
         }
     }
 
+    /// Prefer URL/text into the field; only auto-resolve true media pastes.
     private func pasteboardHasNonTextMedia() -> Bool {
         let pb = NSPasteboard.general
+
+        if let string = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           string.hasPrefix("http://") || string.hasPrefix("https://") {
+            return false
+        }
         if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
-           urls.contains(where: { $0.isFileURL }) {
+           urls.contains(where: { !$0.isFileURL }) {
+            return false
+        }
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           urls.contains(where: \.isFileURL) {
+            return true
+        }
+        if pb.availableType(from: [.png, .tiff]) != nil {
             return true
         }
         if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-           !images.isEmpty,
-           pb.string(forType: .string) == nil {
-            return true
-        }
-        if pb.availableType(from: [.png, .tiff]) != nil,
-           pb.string(forType: .string)?.hasPrefix("http") != true {
+           !images.isEmpty {
             return true
         }
         return false
+    }
+
+    private func handleIdlePaste() async {
+        if pasteboardHasNonTextMedia() {
+            await resolveFromPasteboard()
+            return
+        }
+
+        let pb = NSPasteboard.general
+        if let string = pb.string(forType: .string) {
+            inputText = string
+            focus = .input
+            return
+        }
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let url = urls.first(where: { !$0.isFileURL }) {
+            inputText = url.absoluteString
+            focus = .input
+            return
+        }
+
+        await resolveFromPasteboard()
     }
 
     private func resolveFromInput() async {
@@ -409,18 +445,29 @@ struct MenuBarCaptureView: View {
         self.draft = draft
         notes = ""
         selectedBoardIndex = 0
+        selectedBoardID = nil
         errorMessage = nil
-        phase = .confirm
+        phase = .selectBoard
         focus = nil
     }
 
-    private func commitSelected() async {
-        guard phase == .confirm,
-              let draft,
+    private func advanceToNotes() {
+        guard phase == .selectBoard,
               boards.indices.contains(selectedBoardIndex)
         else { return }
+        selectedBoardID = boards[selectedBoardIndex].id
+        notes = ""
+        errorMessage = nil
+        phase = .notes
+        focusNotes()
+    }
 
-        let board = boards[selectedBoardIndex]
+    private func commitSelected() async {
+        guard phase == .notes,
+              let draft,
+              let board = selectedBoard
+        else { return }
+
         phase = .committing
         errorMessage = nil
         do {
@@ -429,11 +476,11 @@ struct MenuBarCaptureView: View {
             successBoardTitle = board.title
             phase = .success
             try? await Task.sleep(nanoseconds: 500_000_000)
-            resetToIdle(clearError: true)
-            focusInput()
+            dismissPanel()
         } catch {
-            phase = .confirm
+            phase = .notes
             errorMessage = error.localizedDescription
+            focusNotes()
         }
     }
 
@@ -443,6 +490,7 @@ struct MenuBarCaptureView: View {
         notes = ""
         inputText = ""
         selectedBoardIndex = 0
+        selectedBoardID = nil
         successBoardTitle = ""
         if clearError { errorMessage = nil }
     }

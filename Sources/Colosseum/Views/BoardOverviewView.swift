@@ -34,6 +34,15 @@ struct BoardOverviewView: View {
     /// Keyboard tag-assign: T focuses the block, popover for multi-select; Esc exits.
     @State private var isAssigningTag = false
     @State private var tagAssignFocusIndex = 0
+    /// Soft-removed connections that can be restored with undo (max 3).
+    @State private var removalUndoStack: [RemovalUndoEntry] = []
+
+    private struct RemovalUndoEntry {
+        let boardID: UUID
+        let position: Int
+        let blockID: UUID?
+        let nestedBoardID: UUID?
+    }
 
     private var isBrowsingGrid: Bool {
         selectedConnectionID == nil && arenaBrowseTarget == nil
@@ -186,7 +195,12 @@ struct BoardOverviewView: View {
             .focused($boardFocused)
             .focusEffectDisabled()
             .onAppear { activateBoardFocus() }
-            .onDisappear { boardKeyMonitor.remove() }
+            .onDisappear {
+                boardKeyMonitor.remove()
+                while let entry = removalUndoStack.popLast() {
+                    finalizeOrphan(from: entry)
+                }
+            }
             .onChange(of: isBrowsingGrid) { _, browsing in
                 if browsing {
                     activateBoardFocus()
@@ -344,6 +358,14 @@ struct BoardOverviewView: View {
                 handleEscape()
             }
         }
+        boardKeyMonitor.onDelete = {
+            guard isBrowsingGrid, !isAssigningTag else { return }
+            deleteFocusedConnection()
+        }
+        boardKeyMonitor.onUndo = {
+            guard isBrowsingGrid, !isAssigningTag else { return false }
+            return undoLastRemoval()
+        }
         boardKeyMonitor.onCharacter = { char in
             guard isBrowsingGrid else { return false }
             if char == "t" {
@@ -354,6 +376,93 @@ struct BoardOverviewView: View {
         }
         boardKeyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         boardKeyMonitor.install()
+    }
+
+    private func deleteFocusedConnection() {
+        guard let focusID = gridFocusID,
+              let index = filteredConnections.firstIndex(where: { $0.id == focusID })
+        else { return }
+
+        let connection = filteredConnections[index]
+        let entry = RemovalUndoEntry(
+            boardID: board.id,
+            position: connection.position,
+            blockID: connection.block?.id,
+            nestedBoardID: connection.nestedBoard?.id
+        )
+
+        // Soft-remove so undo can reconnect without restoring media from disk.
+        ImportService.removeConnection(connection, deleteOrphanedBlock: false, context: context)
+        pushRemovalUndo(entry)
+        try? context.save()
+
+        let remaining = filteredConnections
+        if remaining.isEmpty {
+            gridFocusID = nil
+        } else if index < remaining.count {
+            gridFocusID = remaining[index].id
+        } else {
+            gridFocusID = remaining[remaining.count - 1].id
+        }
+    }
+
+    private func pushRemovalUndo(_ entry: RemovalUndoEntry) {
+        removalUndoStack.append(entry)
+        while removalUndoStack.count > 3 {
+            let dropped = removalUndoStack.removeFirst()
+            finalizeOrphan(from: dropped)
+        }
+    }
+
+    @discardableResult
+    private func undoLastRemoval() -> Bool {
+        guard let entry = removalUndoStack.popLast() else { return false }
+        let targetBoard = entry.boardID == board.id
+            ? board
+            : allBoards.first(where: { $0.id == entry.boardID })
+        guard let targetBoard else {
+            finalizeOrphan(from: entry)
+            return true
+        }
+
+        let block: Block? = {
+            guard let id = entry.blockID else { return nil }
+            return try? context.fetch(
+                FetchDescriptor<Block>(predicate: #Predicate { $0.id == id })
+            ).first
+        }()
+        let nested: Board? = entry.nestedBoardID.flatMap { id in
+            allBoards.first(where: { $0.id == id })
+        }
+
+        guard block != nil || nested != nil else { return true }
+
+        ImportService.reconnect(
+            block: block,
+            nestedBoard: nested,
+            to: targetBoard,
+            position: entry.position,
+            context: context
+        )
+        try? context.save()
+
+        if targetBoard.id == board.id {
+            if let block {
+                gridFocusID = board.connections.first(where: { $0.block?.id == block.id })?.id
+            } else if let nested {
+                gridFocusID = board.connections.first(where: { $0.nestedBoard?.id == nested.id })?.id
+            }
+        }
+        return true
+    }
+
+    private func finalizeOrphan(from entry: RemovalUndoEntry) {
+        guard let id = entry.blockID else { return }
+        guard let block = try? context.fetch(
+            FetchDescriptor<Block>(predicate: #Predicate { $0.id == id })
+        ).first else { return }
+        ImportService.deleteOrphanedBlockIfNeeded(block, context: context)
+        try? context.save()
     }
 
     private func toggleTagAssign() {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftData
 import SwiftUI
 
@@ -102,10 +103,22 @@ struct ColosseumApp: App {
             MenuBarCaptureView()
                 .modelContainer(container)
         } label: {
-            Label("Colosseum Capture", systemImage: "plus.square.on.square")
+            if let image = Bundle.module.image(forResource: "AppIconMark") {
+                Image(nsImage: menuBarTemplateImage(from: image))
+            } else {
+                Image(systemName: "plus.square.on.square")
+            }
         }
         .menuBarExtraStyle(.window)
     }
+}
+
+private func menuBarTemplateImage(from image: NSImage) -> NSImage {
+    let copy = image.copy() as? NSImage ?? image
+    copy.isTemplate = true
+    // Draw at menu-bar glyph size; avoid SwiftUI .frame so hit target stays native.
+    copy.size = NSSize(width: 18, height: 18)
+    return copy
 }
 
 extension Notification.Name {

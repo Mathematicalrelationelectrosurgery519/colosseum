@@ -92,8 +92,9 @@ enum ImportService {
         }
     }
 
+    /// Positions decrease so new connections sort to the top of the board.
     static func nextPosition(in board: Board) -> Int {
-        (board.connections.map(\.position).max() ?? -1) + 1
+        (board.connections.map(\.position).min() ?? 0) - 1
     }
 
     static func connect(block: Block, to board: Board, context: ModelContext) {
@@ -398,10 +399,39 @@ enum ImportService {
         board?.updatedAt = .now
 
         if deleteOrphanedBlock, let block, block.connections.isEmpty {
-            if block.localRelativePath != nil {
-                MediaLibrary.removeBlockFiles(block.id)
-            }
-            context.delete(block)
+            deleteOrphanedBlockIfNeeded(block, context: context)
         }
+    }
+
+    /// Reconnect a block or nested board at an explicit position (for undo).
+    static func reconnect(
+        block: Block? = nil,
+        nestedBoard: Board? = nil,
+        to board: Board,
+        position: Int,
+        context: ModelContext
+    ) {
+        if let block {
+            if board.connections.contains(where: { $0.block?.id == block.id }) { return }
+            let connection = Connection(board: board, block: block, position: position)
+            context.insert(connection)
+            board.updatedAt = .now
+            return
+        }
+        if let nestedBoard {
+            guard nestedBoard.id != board.id else { return }
+            if board.connections.contains(where: { $0.nestedBoard?.id == nestedBoard.id }) { return }
+            let connection = Connection(board: board, nestedBoard: nestedBoard, position: position)
+            context.insert(connection)
+            board.updatedAt = .now
+        }
+    }
+
+    static func deleteOrphanedBlockIfNeeded(_ block: Block, context: ModelContext) {
+        guard block.connections.isEmpty else { return }
+        if block.localRelativePath != nil {
+            MediaLibrary.removeBlockFiles(block.id)
+        }
+        context.delete(block)
     }
 }
