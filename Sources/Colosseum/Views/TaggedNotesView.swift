@@ -13,11 +13,11 @@ struct TagPill: View {
         Button(action: action) {
             Text(TagParser.displayLabel(tag))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isSelected || isFocused ? color : ColosseumTheme.tertiaryText)
+                .foregroundStyle(isSelected ? color : (isFocused ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText))
                 .overlay(alignment: .bottom) {
                     if isFocused {
                         Rectangle()
-                            .fill(color)
+                            .fill(ColosseumTheme.primaryText)
                             .frame(height: 1)
                             .offset(y: 3)
                     }
