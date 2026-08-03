@@ -117,27 +117,37 @@ struct ColosseumHomeActionsToolbar: ToolbarContent {
     var onCreate: () -> Void
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(placement: .confirmationAction) {
             HStack(spacing: 8) {
                 Button(action: onSearch) {
-                    Image(systemName: "magnifyingglass")
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                        Text("Search")
+                    }
                 }
-                .buttonStyle(ChromeIconButtonStyle())
+                .buttonStyle(ChromeButtonStyle())
                 .help("Search boards (⌘K)")
                 .pointingHandCursor()
 
                 Button(action: onImport) {
-                    Label("Import", systemImage: "square.and.arrow.down")
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Import")
+                    }
                 }
                 .buttonStyle(ChromeButtonStyle())
                 .pointingHandCursor()
 
                 Button(action: onCreate) {
-                    Label("New Board", systemImage: "plus")
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                        Text("New Board")
+                    }
                 }
                 .buttonStyle(ChromeButtonStyle(emphasized: true))
                 .pointingHandCursor()
             }
+            .fixedSize()
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }
         .colosseumPlainToolbarItem()
@@ -165,7 +175,7 @@ struct ColosseumBoardHeaderToolbar: ToolbarContent {
                     .help("Back to board overview")
 
                 HStack(spacing: 10) {
-                    ShortcutHint(text: "⌘+")
+                    ShortcutHint(text: "⌘↩")
                     ShortcutHint(text: "⌘R")
                 }
                 .padding(.leading, 14)

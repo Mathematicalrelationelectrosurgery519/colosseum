@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var showImportArena = false
     @State private var showSearch = false
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
+    @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
 
     var body: some View {
         ZStack {
@@ -118,6 +119,14 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumGoHome)) { _ in
             withAnimation(ColosseumMotion.overlay) { path = [] }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
+            guard path.isEmpty else { return }
+            columnCount = min(columnCount + 1, ChromeMetrics.boardColumnsMax)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsDecrease)) { _ in
+            guard path.isEmpty else { return }
+            columnCount = max(columnCount - 1, ChromeMetrics.boardColumnsMin)
         }
     }
 

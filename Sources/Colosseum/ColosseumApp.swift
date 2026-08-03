@@ -40,7 +40,7 @@ struct ColosseumApp: App {
                 Button("Add to Board…") {
                     NotificationCenter.default.post(name: .colosseumAdd, object: nil)
                 }
-                .keyboardShortcut("+", modifiers: .command)
+                .keyboardShortcut(.return, modifiers: .command)
 
                 Button("Rename Board…") {
                     NotificationCenter.default.post(name: .colosseumRename, object: nil)
@@ -56,6 +56,18 @@ struct ColosseumApp: App {
                     NotificationCenter.default.post(name: .colosseumOpenFiles, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Divider()
+
+                Button("More Columns") {
+                    NotificationCenter.default.post(name: .colosseumColumnsIncrease, object: nil)
+                }
+                .keyboardShortcut("+", modifiers: .command)
+
+                Button("Fewer Columns") {
+                    NotificationCenter.default.post(name: .colosseumColumnsDecrease, object: nil)
+                }
+                .keyboardShortcut("-", modifiers: .command)
 
                 Divider()
 
@@ -89,4 +101,6 @@ extension Notification.Name {
     static let colosseumImportArena = Notification.Name("colosseum.importArena")
     static let colosseumSearch = Notification.Name("colosseum.search")
     static let colosseumGoHome = Notification.Name("colosseum.goHome")
+    static let colosseumColumnsIncrease = Notification.Name("colosseum.columnsIncrease")
+    static let colosseumColumnsDecrease = Notification.Name("colosseum.columnsDecrease")
 }

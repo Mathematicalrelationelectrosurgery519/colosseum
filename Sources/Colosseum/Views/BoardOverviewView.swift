@@ -167,7 +167,7 @@ struct BoardOverviewView: View {
         .background {
             Group {
                 Button("") { showAddSheet = true }
-                    .keyboardShortcut("+", modifiers: .command)
+                    .keyboardShortcut(.return, modifiers: .command)
                 Button("") {
                     renameTitle = board.title
                     showRename = true
@@ -215,6 +215,12 @@ struct BoardOverviewView: View {
         .onReceive(NotificationCenter.default.publisher(for: .colosseumRename)) { _ in
             renameTitle = board.title
             showRename = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
+            adjustColumns(by: 1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsDecrease)) { _ in
+            adjustColumns(by: -1)
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumPaste)) { _ in
             Task { await paste() }
@@ -288,6 +294,18 @@ struct BoardOverviewView: View {
         Button("Remove from Board", role: .destructive) {
             ImportService.removeConnection(connection, deleteOrphanedBlock: true, context: context)
             try? context.save()
+        }
+    }
+
+    private func adjustColumns(by delta: Int) {
+        guard isBrowsingGrid else { return }
+        let next = min(
+            max(columnCount + delta, ChromeMetrics.boardColumnsMin),
+            ChromeMetrics.boardColumnsMax
+        )
+        guard next != columnCount else { return }
+        withAnimation(ColosseumMotion.standard) {
+            columnCount = next
         }
     }
 
