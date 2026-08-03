@@ -19,8 +19,17 @@ struct BoardOverviewView: View {
     @State private var isTargeted = false
     @State private var selectedTags: Set<String> = []
     @State private var tagMatchMode: TagMatchMode = .intersection
+    @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
+    @State private var pinchBaseColumns: Int?
+    @State private var lastPinchStep = 0
 
-    private let columns = [GridItem(.adaptive(minimum: ColosseumTheme.cellMin, maximum: 260), spacing: ColosseumTheme.gridGap)]
+    private var columns: [GridItem] {
+        let count = min(max(columnCount, ChromeMetrics.boardColumnsMin), ChromeMetrics.boardColumnsMax)
+        return Array(
+            repeating: GridItem(.flexible(minimum: 72), spacing: ColosseumTheme.gridGap),
+            count: count
+        )
+    }
 
     private var connections: [Connection] {
         board.sortedConnections
@@ -72,9 +81,11 @@ struct BoardOverviewView: View {
                     .animation(ColosseumMotion.standard, value: selectedTags)
                     .animation(ColosseumMotion.standard, value: tagMatchMode)
                     .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
+                    .animation(ColosseumMotion.standard, value: columnCount)
                 }
             }
             .background(ColosseumTheme.canvas)
+            .simultaneousGesture(columnPinchGesture)
 
             if let connection = selectedConnection, let block = connection.block, block.kind != .arenaChannel {
                 BlockView(
@@ -107,7 +118,9 @@ struct BoardOverviewView: View {
                         }
                     },
                     onImportedBoard: { imported in
-                        path.append(imported.id)
+                        withAnimation(ColosseumMotion.overlay) {
+                            path.append(imported.id)
+                        }
                     }
                 )
                 .transition(ColosseumMotion.overlayTransition)
@@ -116,24 +129,45 @@ struct BoardOverviewView: View {
         }
         .animation(ColosseumMotion.overlay, value: selectedConnectionID)
         .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
-        .navigationTitle(board.title)
+        .navigationTitle("")
         .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbarColorScheme(.dark, for: .windowToolbar)
         .toolbar {
-            ToolbarItemGroup {
-                if isImporting {
-                    ProgressView().controlSize(.small)
-                }
-                Button("Add") { showAddSheet = true }
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .pointingHandCursor()
-                Button("Rename") {
+            ColosseumBoardHeaderToolbar(
+                title: board.title,
+                onHome: {
+                    withAnimation(ColosseumMotion.overlay) {
+                        path = []
+                    }
+                },
+                onTitleTap: navigateBackViaTitle
+            )
+            ColosseumColumnSliderToolbar(
+                columnCount: $columnCount,
+                isImporting: isImporting,
+                visible: true
+            )
+        }
+        .background {
+            Group {
+                Button("") { showAddSheet = true }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("") {
                     renameTitle = board.title
                     showRename = true
                 }
-                .pointingHandCursor()
+                .keyboardShortcut("r", modifiers: .command)
             }
+            .opacity(0)
+            .allowsHitTesting(false)
+        }
+        .focusable()
+        .focusEffectDisabled()
+        .onExitCommand(perform: handleEscape)
+        .onKeyPress(.escape) {
+            handleEscape()
+            return .handled
         }
         .sheet(isPresented: $showAddSheet) {
             AddContentSheet(board: board)
@@ -163,6 +197,10 @@ struct BoardOverviewView: View {
         .onReceive(NotificationCenter.default.publisher(for: .colosseumAdd)) { _ in
             showAddSheet = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumRename)) { _ in
+            renameTitle = board.title
+            showRename = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumPaste)) { _ in
             Task { await paste() }
         }
@@ -183,7 +221,7 @@ struct BoardOverviewView: View {
     private func connectionCell(_ connection: Connection) -> some View {
         if let nested = connection.nestedBoard {
             Button {
-                withAnimation(ColosseumMotion.soft) {
+                withAnimation(ColosseumMotion.overlay) {
                     path.append(nested.id)
                 }
             } label: {
@@ -233,6 +271,76 @@ struct BoardOverviewView: View {
         Button("Remove from Board", role: .destructive) {
             ImportService.removeConnection(connection, deleteOrphanedBlock: true, context: context)
             try? context.save()
+        }
+    }
+
+    private var columnPinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                // Only drive density while browsing the grid (not block/arena overlays).
+                guard selectedConnectionID == nil, arenaBrowseTarget == nil else { return }
+                if pinchBaseColumns == nil {
+                    pinchBaseColumns = columnCount
+                    lastPinchStep = 0
+                }
+                // Pinch out (value > 1) → larger cells → fewer columns.
+                let step = Int(((value - 1) / ChromeMetrics.pinchStepThreshold).rounded(.towardZero))
+                guard step != lastPinchStep, let base = pinchBaseColumns else { return }
+                lastPinchStep = step
+                let next = min(
+                    max(base - step, ChromeMetrics.boardColumnsMin),
+                    ChromeMetrics.boardColumnsMax
+                )
+                if next != columnCount {
+                    withAnimation(ColosseumMotion.standard) {
+                        columnCount = next
+                    }
+                }
+            }
+            .onEnded { _ in
+                pinchBaseColumns = nil
+                lastPinchStep = 0
+            }
+    }
+
+    private func navigateBackViaTitle() {
+        if selectedConnectionID != nil {
+            withAnimation(ColosseumMotion.overlay) {
+                selectedConnectionID = nil
+            }
+            return
+        }
+        if arenaBrowseTarget != nil {
+            withAnimation(ColosseumMotion.overlay) {
+                arenaBrowseTarget = nil
+            }
+            return
+        }
+        guard path.count > 1 else { return }
+        withAnimation(ColosseumMotion.overlay) {
+            _ = path.popLast()
+        }
+    }
+
+    private func handleEscape() {
+        if selectedConnectionID != nil {
+            withAnimation(ColosseumMotion.overlay) {
+                selectedConnectionID = nil
+            }
+            return
+        }
+        if arenaBrowseTarget != nil {
+            withAnimation(ColosseumMotion.overlay) {
+                arenaBrowseTarget = nil
+            }
+            return
+        }
+        withAnimation(ColosseumMotion.overlay) {
+            if path.count > 1 {
+                _ = path.popLast()
+            } else {
+                path = []
+            }
         }
     }
 

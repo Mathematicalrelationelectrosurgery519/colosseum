@@ -4,7 +4,7 @@ import SwiftUI
 /// Plain, borderless notes field with live #tag coloring and ⌘-click to filter.
 struct NotesEditor: NSViewRepresentable {
     @Binding var text: String
-    var placeholder: String = "Add notes… Use #tags to group. ⌘-click a tag to filter."
+    var placeholder: String = "notes..."
     var onTagTap: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -22,6 +22,7 @@ struct NotesEditor: NSViewRepresentable {
         let textView = TagAwareTextView()
         textView.delegate = context.coordinator
         textView.onTagTap = onTagTap
+        textView.placeholderString = placeholder
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isEditable = true
@@ -49,6 +50,7 @@ struct NotesEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? TagAwareTextView else { return }
         textView.onTagTap = onTagTap
+        textView.placeholderString = placeholder
         if textView.string != text {
             let selected = textView.selectedRange()
             textView.string = text
@@ -56,6 +58,7 @@ struct NotesEditor: NSViewRepresentable {
             let max = (textView.string as NSString).length
             textView.setSelectedRange(NSRange(location: min(selected.location, max), length: 0))
         }
+        textView.needsDisplay = true
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -71,6 +74,7 @@ struct NotesEditor: NSViewRepresentable {
             guard let textView, !applying else { return }
             parent.text = textView.string
             applyHighlighting(to: textView)
+            textView.needsDisplay = true
         }
 
         func applyHighlighting(to textView: NSTextView) {
@@ -119,6 +123,21 @@ struct NotesEditor: NSViewRepresentable {
 final class TagAwareTextView: NSTextView {
     var onTagTap: ((String) -> Void)?
     var tagRanges: [(NSRange, String)] = []
+    var placeholderString: String = "notes..."
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty else { return }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(ColosseumTheme.tertiaryText),
+            .font: font ?? .systemFont(ofSize: 13)
+        ]
+        let origin = CGPoint(
+            x: textContainerOrigin.x + textContainerInset.width,
+            y: textContainerOrigin.y + textContainerInset.height
+        )
+        (placeholderString as NSString).draw(at: origin, withAttributes: attrs)
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

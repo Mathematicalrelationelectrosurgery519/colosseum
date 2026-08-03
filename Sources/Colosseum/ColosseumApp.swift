@@ -26,7 +26,9 @@ struct ColosseumApp: App {
                 .modelContainer(container)
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 900, minHeight: 600)
+                .background(WindowChromeStabilizer())
         }
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -38,7 +40,12 @@ struct ColosseumApp: App {
                 Button("Add to Board…") {
                     NotificationCenter.default.post(name: .colosseumAdd, object: nil)
                 }
-                .keyboardShortcut(.return, modifiers: .command)
+                .keyboardShortcut("+", modifiers: .command)
+
+                Button("Rename Board…") {
+                    NotificationCenter.default.post(name: .colosseumRename, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: .command)
 
                 Button("Paste into Board") {
                     NotificationCenter.default.post(name: .colosseumPaste, object: nil)
@@ -52,10 +59,22 @@ struct ColosseumApp: App {
 
                 Divider()
 
-                Button("Browse or Import Are.na…") {
+                Button("Search Boards…") {
+                    NotificationCenter.default.post(name: .colosseumSearch, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Button("Import…") {
                     NotificationCenter.default.post(name: .colosseumImportArena, object: nil)
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            }
+
+            CommandGroup(after: .sidebar) {
+                Button("Boards") {
+                    NotificationCenter.default.post(name: .colosseumGoHome, object: nil)
+                }
+                .keyboardShortcut("1", modifiers: .command)
             }
         }
     }
@@ -64,7 +83,10 @@ struct ColosseumApp: App {
 extension Notification.Name {
     static let colosseumNewBoard = Notification.Name("colosseum.newBoard")
     static let colosseumAdd = Notification.Name("colosseum.add")
+    static let colosseumRename = Notification.Name("colosseum.rename")
     static let colosseumPaste = Notification.Name("colosseum.paste")
     static let colosseumOpenFiles = Notification.Name("colosseum.openFiles")
     static let colosseumImportArena = Notification.Name("colosseum.importArena")
+    static let colosseumSearch = Notification.Name("colosseum.search")
+    static let colosseumGoHome = Notification.Name("colosseum.goHome")
 }

@@ -13,6 +13,7 @@ struct BlockView: View {
     @Environment(\.modelContext) private var context
 
     @State private var showConnect = false
+    @State private var showMeta = false
     @State private var loopingPlayer: LoopingVideoPlayer?
     @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
@@ -42,6 +43,15 @@ struct BlockView: View {
                 .frame(width: ColosseumTheme.sidebarWidth)
         }
         .background(ColosseumTheme.canvas)
+        .overlay(alignment: .bottomTrailing) {
+            HStack(spacing: 10) {
+                ShortcutHint(text: "←")
+                ShortcutHint(text: "→")
+                ShortcutHint(text: "esc")
+            }
+            .padding(16)
+            .allowsHitTesting(false)
+        }
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
@@ -60,6 +70,7 @@ struct BlockView: View {
         }
         .onChange(of: selectedID) { _, _ in
             focused = true
+            showMeta = false
             reloadPlayer()
         }
         .onExitCommand(perform: onClose)
@@ -151,9 +162,8 @@ struct BlockView: View {
                     .multilineTextAlignment(.center)
                 if let source = block.sourceURL, let url = URL(string: source) {
                     Button("Open Link") { NSWorkspace.shared.open(url) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.white)
-                        .foregroundStyle(.black)
+                        .buttonStyle(ChromeButtonStyle(emphasized: true))
+                        .pointingHandCursor()
                 }
             }
             .padding(40)
@@ -171,9 +181,8 @@ struct BlockView: View {
                 if let urlString = block.arenaURL ?? block.sourceURL,
                    let url = URL(string: urlString) {
                     Button("Open on Are.na") { NSWorkspace.shared.open(url) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.white)
-                        .foregroundStyle(.black)
+                        .buttonStyle(ChromeButtonStyle(emphasized: true))
+                        .pointingHandCursor()
                         .padding(.top, 8)
                 }
             }
@@ -182,43 +191,9 @@ struct BlockView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                Spacer()
-                Button { step(-1) } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(.plain)
-                .disabled(index <= 0)
-
-                Button { step(1) } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .buttonStyle(.plain)
-                .disabled(index >= connections.count - 1)
-
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut("w", modifiers: .command)
-            }
-            .foregroundStyle(ColosseumTheme.secondaryText)
-            .padding(16)
-
             if let block {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        TextField("Title", text: Binding(
-                            get: { block.title },
-                            set: {
-                                block.title = $0
-                                board.updatedAt = .now
-                            }
-                        ))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.primaryText)
-
                         notesSection(for: block)
 
                         if block.kind == .text {
@@ -234,45 +209,16 @@ struct BlockView: View {
                             .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 0.5))
                         }
 
-                        metaTable(for: block)
-
-                        HStack(spacing: 8) {
-                            Button("Connect →") { showConnect = true }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.white)
-                                .foregroundStyle(.black)
-
-                            Menu("Actions") {
-                                if let path = block.localRelativePath {
-                                    let url = MediaLibrary.absoluteURL(relativePath: path)
-                                    Button("Reveal in Finder") {
-                                        NSWorkspace.shared.activateFileViewerSelecting([url])
-                                    }
-                                    Button("Open File") { NSWorkspace.shared.open(url) }
-                                }
-                                if let source = block.sourceURL, let url = URL(string: source) {
-                                    Button("Open Source URL") { NSWorkspace.shared.open(url) }
-                                }
-                                if block.kind == .arenaChannel,
-                                   let urlString = block.arenaURL ?? block.sourceURL,
-                                   let url = URL(string: urlString) {
-                                    Button("Open on Are.na") { NSWorkspace.shared.open(url) }
-                                }
-                                Divider()
-                                Button("Remove from Board", role: .destructive) {
-                                    if let connection {
-                                        ImportService.removeConnection(
-                                            connection,
-                                            deleteOrphanedBlock: true,
-                                            context: context
-                                        )
-                                        try? context.save()
-                                        onClose()
-                                    }
+                        actionRow(for: block)
+                            .overlay(alignment: .topTrailing) {
+                                if showMeta {
+                                    metaOverlay(for: block)
+                                        .fixedSize()
+                                        .offset(y: 36)
+                                        .transition(ColosseumMotion.fade)
                                 }
                             }
-                            .menuStyle(.borderlessButton)
-                        }
+                            .zIndex(2)
 
                         Text("Connections \(block.connections.count)")
                             .font(.system(size: 12, weight: .medium))
@@ -281,7 +227,7 @@ struct BlockView: View {
 
                         connectionsList(for: block)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(16)
                     .padding(.bottom, 24)
                 }
             }
@@ -289,6 +235,79 @@ struct BlockView: View {
             Spacer(minLength: 0)
         }
         .background(ColosseumTheme.canvas)
+    }
+
+    @ViewBuilder
+    private func actionRow(for block: Block) -> some View {
+        HStack(spacing: 8) {
+            Button("Connect →") { showConnect = true }
+                .buttonStyle(ChromeButtonStyle(emphasized: true))
+                .pointingHandCursor()
+
+            if let path = block.localRelativePath {
+                let url = MediaLibrary.absoluteURL(relativePath: path)
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Reveal in Finder")
+                .pointingHandCursor()
+
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Open File")
+                .pointingHandCursor()
+            }
+
+            if let source = block.sourceURL, let url = URL(string: source) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "link")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Open Source URL")
+                .pointingHandCursor()
+            }
+
+            if block.kind == .arenaChannel,
+               let urlString = block.arenaURL ?? block.sourceURL,
+               let url = URL(string: urlString) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "arrow.up.right")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Open on Are.na")
+                .pointingHandCursor()
+            }
+
+            Button {
+                if let connection {
+                    ImportService.removeConnection(
+                        connection,
+                        deleteOrphanedBlock: true,
+                        context: context
+                    )
+                    try? context.save()
+                    onClose()
+                }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(ChromeIconButtonStyle())
+            .help("Remove from Board")
+            .pointingHandCursor()
+
+            metaButton(for: block)
+        }
     }
 
     @ViewBuilder
@@ -301,10 +320,54 @@ struct BlockView: View {
                     board.updatedAt = .now
                 }
             ),
+            placeholder: "notes...",
             onTagTap: onTagTap
         )
-        .frame(minHeight: 64, maxHeight: 140)
+        .frame(minHeight: 72, maxHeight: 160)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func metaButton(for block: Block) -> some View {
+        Button {
+            withAnimation(ColosseumMotion.soft) {
+                showMeta.toggle()
+            }
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(ChromeIconButtonStyle(active: showMeta))
+        .help("Metadata")
+        .pointingHandCursor()
+        .onHover { hovering in
+            withAnimation(ColosseumMotion.soft) {
+                showMeta = hovering
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func metaOverlay(for block: Block) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("Title", text: Binding(
+                get: { block.title },
+                set: {
+                    block.title = $0
+                    board.updatedAt = .now
+                }
+            ))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(ColosseumTheme.primaryText)
+
+            metaTable(for: block)
+        }
+        .padding(12)
+        .frame(width: 260, alignment: .leading)
+        .background(ColosseumTheme.elevated)
+        .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 12, y: 4)
+        .allowsHitTesting(true)
     }
 
     @ViewBuilder

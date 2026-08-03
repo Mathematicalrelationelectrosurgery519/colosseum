@@ -3,40 +3,40 @@ import SwiftUI
 
 struct BoardLibraryView: View {
     let boards: [Board]
-    @Binding var search: String
+    var showsToolbar = true
     var onOpen: (Board) -> Void
     var onCreate: () -> Void
     var onImportArena: () -> Void
+    var onSearch: () -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: ColosseumTheme.gridGap)]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Colosseum")
-                            .font(.system(size: 28, weight: .medium))
-                            .foregroundStyle(ColosseumTheme.primaryText)
-                        Text("Local boards for design curation")
-                            .font(.system(size: 13))
-                            .foregroundStyle(ColosseumTheme.secondaryText)
-                    }
+                HStack(spacing: 8) {
                     Spacer()
-                    Button(action: onImportArena) {
-                        Label("Are.na", systemImage: "arrow.down.left.and.arrow.up.right")
+                    Button(action: onSearch) {
+                        Image(systemName: "magnifyingglass")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ChromeIconButtonStyle())
+                    .help("Search boards (⌘K)")
+                    .pointingHandCursor()
+
+                    Button(action: onImportArena) {
+                        Label("Import", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(ChromeButtonStyle())
+                    .pointingHandCursor()
+
                     Button(action: onCreate) {
                         Label("New Board", systemImage: "plus")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.white)
-                    .foregroundStyle(.black)
-                    .keyboardShortcut("n", modifiers: .command)
+                    .buttonStyle(ChromeButtonStyle(emphasized: true))
+                    .pointingHandCursor()
                 }
                 .padding(.horizontal, 28)
-                .padding(.top, 28)
+                .padding(.top, 20)
 
                 if boards.isEmpty {
                     emptyState
@@ -49,6 +49,7 @@ struct BoardLibraryView: View {
                                 BoardCardView(board: board)
                             }
                             .buttonStyle(.plain)
+                            .pointingHandCursor()
                         }
                     }
                     .padding(.horizontal, 28)
@@ -56,12 +57,21 @@ struct BoardLibraryView: View {
                 }
             }
         }
-        .searchable(text: $search, prompt: "Search boards")
         .background(ColosseumTheme.canvas)
         .navigationTitle("")
+        .navigationBarBackButtonHidden(true)
         .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbarColorScheme(.dark, for: .windowToolbar)
+        .toolbar {
+            if showsToolbar {
+                ColosseumLeadingToolbar(onHome: nil)
+                ColosseumColumnSliderToolbar(
+                    columnCount: .constant(ChromeMetrics.boardColumnsDefault),
+                    visible: false
+                )
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -69,17 +79,19 @@ struct BoardLibraryView: View {
             Text("No boards yet")
                 .font(.title3)
                 .foregroundStyle(ColosseumTheme.primaryText)
-            Text("Create a board, or browse / import a public Are.na channel.")
+            Text("Create a board, or import a public Are.na channel.")
                 .font(.callout)
                 .foregroundStyle(ColosseumTheme.secondaryText)
                 .multilineTextAlignment(.center)
             HStack(spacing: 12) {
-                Button("Are.na", action: onImportArena)
-                    .buttonStyle(.bordered)
-                Button("New Board", action: onCreate)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.white)
-                    .foregroundStyle(.black)
+                Button(action: onImportArena) {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(ChromeButtonStyle())
+                Button(action: onCreate) {
+                    Label("New Board", systemImage: "plus")
+                }
+                .buttonStyle(ChromeButtonStyle(emphasized: true))
             }
             .padding(.top, 8)
         }
