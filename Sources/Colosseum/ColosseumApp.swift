@@ -62,13 +62,13 @@ struct ColosseumApp: App {
 
                 Divider()
 
-                Button("More Columns") {
-                    NotificationCenter.default.post(name: .colosseumColumnsIncrease, object: nil)
+                Button("Fewer Columns") {
+                    NotificationCenter.default.post(name: .colosseumColumnsDecrease, object: nil)
                 }
                 .keyboardShortcut("+", modifiers: .command)
 
-                Button("Fewer Columns") {
-                    NotificationCenter.default.post(name: .colosseumColumnsDecrease, object: nil)
+                Button("More Columns") {
+                    NotificationCenter.default.post(name: .colosseumColumnsIncrease, object: nil)
                 }
                 .keyboardShortcut("-", modifiers: .command)
 
