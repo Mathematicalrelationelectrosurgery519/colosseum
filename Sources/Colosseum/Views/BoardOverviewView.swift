@@ -63,44 +63,112 @@ struct BoardOverviewView: View {
         connections.first(where: { $0.id == selectedConnectionID })
     }
 
+    private var importErrorPresented: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )
+    }
+
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                TagFilterBar(
-                    tags: availableTags,
-                    selected: $selectedTags,
-                    mode: $tagMatchMode
+        boardStack
+            .animation(ColosseumMotion.overlay, value: selectedConnectionID)
+            .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
+            .navigationTitle("")
+            .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
+            .toolbarBackground(.visible, for: .windowToolbar)
+            .toolbarColorScheme(.dark, for: .windowToolbar)
+            .toolbar {
+                ColosseumBoardHeaderToolbar(
+                    title: board.title,
+                    onHome: {
+                        withAnimation(ColosseumMotion.overlay) { path = [] }
+                    },
+                    onTitleTap: navigateBackViaTitle
                 )
-                .animation(ColosseumMotion.soft, value: availableTags)
-
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                        Button {
-                            guard !shouldSuppressGridClicks else { return }
-                            showAddSheet = true
-                        } label: {
-                            AddBlockCell()
-                        }
-                        .buttonStyle(.plain)
-                        .pointingHandCursor()
-
-                        ForEach(filteredConnections, id: \.id) { connection in
-                            connectionCell(connection)
-                                .pointingHandCursor()
-                                .transition(ColosseumMotion.itemTransition)
-                        }
-                    }
-                    .padding(28)
-                    .padding(.top, availableTags.isEmpty ? 0 : 8)
-                    .animation(ColosseumMotion.standard, value: selectedTags)
-                    .animation(ColosseumMotion.standard, value: tagMatchMode)
-                    .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
-                    .animation(ColosseumMotion.standard, value: columnCount)
-                    .allowsHitTesting(!isPinching)
-                }
-                .highPriorityGesture(columnPinchGesture)
+                ColosseumColumnSliderToolbar(
+                    columnCount: $columnCount,
+                    isImporting: isImporting,
+                    visible: isBrowsingGrid
+                )
             }
-            .background(ColosseumTheme.canvas)
+            .background { boardKeyEquivalents }
+            .focusable()
+            .focusEffectDisabled()
+            .onExitCommand(perform: handleEscape)
+            .onKeyPress(.escape) {
+                handleEscape()
+                return .handled
+            }
+            .sheet(isPresented: $showAddSheet) {
+                AddContentSheet(board: board)
+            }
+            .alert("Rename Board", isPresented: $showRename) {
+                TextField("Title", text: $renameTitle)
+                Button("Save") {
+                    board.title = renameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? board.title : renameTitle
+                    board.updatedAt = .now
+                    try? context.save()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .onDrop(of: [.fileURL, .url, .plainText, .image, .png, .tiff], isTargeted: $isTargeted) { providers in
+                _ = handleDrop(providers)
+                return true
+            }
+            .overlay {
+                if isTargeted {
+                    Rectangle()
+                        .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumAdd)) { _ in
+                showAddSheet = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumRename)) { _ in
+                renameTitle = board.title
+                showRename = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
+                adjustColumns(by: 1)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsDecrease)) { _ in
+                adjustColumns(by: -1)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumPaste)) { _ in
+                Task { await paste() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenFiles)) { _ in
+                openFiles()
+            }
+            .alert("Import Error", isPresented: importErrorPresented) {
+                Button("OK", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+    }
+
+    private var boardKeyEquivalents: some View {
+        Group {
+            Button("") { showAddSheet = true }
+                .keyboardShortcut(.return, modifiers: .command)
+            Button("") {
+                renameTitle = board.title
+                showRename = true
+            }
+            .keyboardShortcut("r", modifiers: .command)
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+    }
+
+    private var boardStack: some View {
+        ZStack {
+            boardGrid
+                .background(ColosseumTheme.canvas)
 
             if let connection = selectedConnection, let block = connection.block, block.kind != .arenaChannel {
                 BlockView(
@@ -142,99 +210,43 @@ struct BoardOverviewView: View {
                 .zIndex(20)
             }
         }
-        .animation(ColosseumMotion.overlay, value: selectedConnectionID)
-        .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
-        .navigationTitle("")
-        .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .toolbarColorScheme(.dark, for: .windowToolbar)
-        .toolbar {
-            ColosseumBoardHeaderToolbar(
-                title: board.title,
-                onHome: {
-                    withAnimation(ColosseumMotion.overlay) {
-                        path = []
+    }
+
+    private var boardGrid: some View {
+        VStack(spacing: 0) {
+            TagFilterBar(
+                tags: availableTags,
+                selected: $selectedTags,
+                mode: $tagMatchMode
+            )
+            .animation(ColosseumMotion.soft, value: availableTags)
+
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                    Button {
+                        guard !shouldSuppressGridClicks else { return }
+                        showAddSheet = true
+                    } label: {
+                        AddBlockCell()
                     }
-                },
-                onTitleTap: navigateBackViaTitle
-            )
-            ColosseumColumnSliderToolbar(
-                columnCount: $columnCount,
-                isImporting: isImporting,
-                visible: isBrowsingGrid
-            )
-        }
-        .background {
-            Group {
-                Button("") { showAddSheet = true }
-                    .keyboardShortcut(.return, modifiers: .command)
-                Button("") {
-                    renameTitle = board.title
-                    showRename = true
+                    .buttonStyle(.plain)
+                    .pointingHandCursor()
+
+                    ForEach(filteredConnections, id: \.id) { connection in
+                        connectionCell(connection)
+                            .pointingHandCursor()
+                            .transition(ColosseumMotion.itemTransition)
+                    }
                 }
-                .keyboardShortcut("r", modifiers: .command)
+                .padding(28)
+                .padding(.top, availableTags.isEmpty ? 0 : 8)
+                .animation(ColosseumMotion.standard, value: selectedTags)
+                .animation(ColosseumMotion.standard, value: tagMatchMode)
+                .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
+                .animation(ColosseumMotion.standard, value: columnCount)
+                .allowsHitTesting(!isPinching)
             }
-            .opacity(0)
-            .allowsHitTesting(false)
-        }
-        .focusable()
-        .focusEffectDisabled()
-        .onExitCommand(perform: handleEscape)
-        .onKeyPress(.escape) {
-            handleEscape()
-            return .handled
-        }
-        .sheet(isPresented: $showAddSheet) {
-            AddContentSheet(board: board)
-        }
-        .alert("Rename Board", isPresented: $showRename) {
-            TextField("Title", text: $renameTitle)
-            Button("Save") {
-                board.title = renameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? board.title : renameTitle
-                board.updatedAt = .now
-                try? context.save()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .onDrop(of: [.fileURL, .url, .plainText, .image, .png, .tiff], isTargeted: $isTargeted) { providers in
-            _ = handleDrop(providers)
-            return true
-        }
-        .overlay {
-            if isTargeted {
-                Rectangle()
-                    .stroke(Color.white.opacity(0.5), lineWidth: 2)
-                    .padding(8)
-                    .allowsHitTesting(false)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumAdd)) { _ in
-            showAddSheet = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumRename)) { _ in
-            renameTitle = board.title
-            showRename = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
-            adjustColumns(by: 1)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsDecrease)) { _ in
-            adjustColumns(by: -1)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumPaste)) { _ in
-            Task { await paste() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenFiles)) { _ in
-            openFiles()
-        }
-        .alert("Import Error", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+            .highPriorityGesture(columnPinchGesture)
         }
     }
 
