@@ -22,6 +22,19 @@ struct BoardOverviewView: View {
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
     @State private var pinchBaseColumns: Int?
     @State private var lastPinchStep = 0
+    @State private var isPinching = false
+    @State private var pinchDidChange = false
+    @State private var suppressGridClicksUntil: Date?
+
+    private var isBrowsingGrid: Bool {
+        selectedConnectionID == nil && arenaBrowseTarget == nil
+    }
+
+    private var shouldSuppressGridClicks: Bool {
+        if isPinching { return true }
+        if let until = suppressGridClicksUntil, Date() < until { return true }
+        return false
+    }
 
     private var columns: [GridItem] {
         let count = min(max(columnCount, ChromeMetrics.boardColumnsMin), ChromeMetrics.boardColumnsMax)
@@ -63,6 +76,7 @@ struct BoardOverviewView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
                         Button {
+                            guard !shouldSuppressGridClicks else { return }
                             showAddSheet = true
                         } label: {
                             AddBlockCell()
@@ -82,8 +96,9 @@ struct BoardOverviewView: View {
                     .animation(ColosseumMotion.standard, value: tagMatchMode)
                     .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
                     .animation(ColosseumMotion.standard, value: columnCount)
+                    .allowsHitTesting(!isPinching)
                 }
-                .simultaneousGesture(columnPinchGesture)
+                .highPriorityGesture(columnPinchGesture)
             }
             .background(ColosseumTheme.canvas)
 
@@ -146,7 +161,7 @@ struct BoardOverviewView: View {
             ColosseumColumnSliderToolbar(
                 columnCount: $columnCount,
                 isImporting: isImporting,
-                visible: true
+                visible: isBrowsingGrid
             )
         }
         .background {
@@ -221,6 +236,7 @@ struct BoardOverviewView: View {
     private func connectionCell(_ connection: Connection) -> some View {
         if let nested = connection.nestedBoard {
             Button {
+                guard !shouldSuppressGridClicks else { return }
                 withAnimation(ColosseumMotion.overlay) {
                     path.append(nested.id)
                 }
@@ -231,6 +247,7 @@ struct BoardOverviewView: View {
             .contextMenu { connectionMenu(connection) }
         } else if let block = connection.block {
             Button {
+                guard !shouldSuppressGridClicks else { return }
                 if block.kind == .arenaChannel {
                     openArenaBrowser(for: block)
                 } else {
@@ -278,15 +295,21 @@ struct BoardOverviewView: View {
         MagnificationGesture()
             .onChanged { value in
                 // Only drive density while browsing the grid (not block/arena overlays).
-                guard selectedConnectionID == nil, arenaBrowseTarget == nil else { return }
+                guard isBrowsingGrid else { return }
                 if pinchBaseColumns == nil {
+                    isPinching = true
+                    pinchDidChange = false
                     pinchBaseColumns = columnCount
                     lastPinchStep = 0
+                }
+                if abs(value - 1) > 0.04 {
+                    pinchDidChange = true
                 }
                 // Pinch out (value > 1) → larger cells → fewer columns.
                 let step = Int(((value - 1) / ChromeMetrics.pinchStepThreshold).rounded(.towardZero))
                 guard step != lastPinchStep, let base = pinchBaseColumns else { return }
                 lastPinchStep = step
+                pinchDidChange = true
                 let next = min(
                     max(base - step, ChromeMetrics.boardColumnsMin),
                     ChromeMetrics.boardColumnsMax
@@ -298,6 +321,12 @@ struct BoardOverviewView: View {
                 }
             }
             .onEnded { _ in
+                if pinchDidChange {
+                    // Swallow the mouse-up / click that often follows a trackpad pinch.
+                    suppressGridClicksUntil = Date().addingTimeInterval(0.45)
+                }
+                isPinching = false
+                pinchDidChange = false
                 pinchBaseColumns = nil
                 lastPinchStep = 0
             }

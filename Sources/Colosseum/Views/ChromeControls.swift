@@ -187,6 +187,7 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
                 ColumnDensityControl(columnCount: $columnCount)
                     .opacity(visible ? 1 : 0)
                     .allowsHitTesting(visible)
+                    .animation(ColosseumMotion.overlay, value: visible)
             }
             // System toolbar already insets a bit; pad the rest to match grid content (28).
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
