@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MenuBarCaptureView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.openWindow) private var openWindow
     @Query(sort: \Board.updatedAt, order: .reverse) private var boards: [Board]
 
     @State private var phase: Phase = .idle
@@ -39,7 +40,7 @@ struct MenuBarCaptureView: View {
             if showsPreview {
                 previewHeader
                     .padding(12)
-                Divider().overlay(ColosseumTheme.border)
+                Divider()
             }
 
             switch phase {
@@ -55,8 +56,6 @@ struct MenuBarCaptureView: View {
         }
         .frame(width: 300)
         .fixedSize(horizontal: false, vertical: true)
-        .background(ColosseumTheme.canvas)
-        .preferredColorScheme(.dark)
         .onAppear {
             panelWindow = NSApp.keyWindow
             installKeys()
@@ -67,6 +66,9 @@ struct MenuBarCaptureView: View {
             keyMonitor.remove()
             removePasteMonitor()
             resetToIdle(clearError: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumRevealMainWindow)) { _ in
+            openMainWindow()
         }
     }
 
@@ -82,41 +84,53 @@ struct MenuBarCaptureView: View {
     // MARK: - Phase bodies
 
     private var idleBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             TextField("Paste URL or media…", text: $inputText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(ColosseumTheme.primaryText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .background(ColosseumTheme.surface)
-                .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+                .textFieldStyle(.roundedBorder)
                 .focused($focus, equals: .input)
                 .onSubmit { Task { await resolveFromInput() } }
                 .disabled(phase == .resolving)
 
             if phase == .resolving {
                 Text("Resolving…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.red)
             }
+
+            Divider()
+                .padding(.top, 2)
+
+            menuButton("Open") {
+                dismissPanel()
+                openMainWindow()
+            }
+
+            menuButton("Quit") {
+                NSApp.terminate(nil)
+            }
         }
-        .padding(12)
+        .padding(10)
     }
 
     private var boardSelectBody: some View {
         Group {
             if boards.isEmpty {
-                Text("No boards yet")
-                    .font(.system(size: 12))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-                    .padding(12)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No boards yet")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    menuButton("Open") {
+                        dismissPanel()
+                        openMainWindow()
+                    }
+                }
+                .padding(12)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(boards.enumerated()), id: \.element.id) { index, board in
@@ -131,28 +145,25 @@ struct MenuBarCaptureView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let board = selectedBoard {
                 Text(board.title)
-                    .font(.system(size: 11))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             TextField("Notes (optional)", text: $notes)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(ColosseumTheme.primaryText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(ColosseumTheme.surface)
-                .overlay(Rectangle().stroke(
-                    focus == .notes ? ColosseumTheme.primaryText.opacity(0.35) : ColosseumTheme.border,
-                    lineWidth: 1
-                ))
+                .textFieldStyle(.roundedBorder)
                 .focused($focus, equals: .notes)
                 .onSubmit { Task { await commitSelected() } }
                 .disabled(phase == .committing)
 
+            if phase == .committing {
+                Text("Adding…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.red)
             }
         }
@@ -163,10 +174,9 @@ struct MenuBarCaptureView: View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(ColosseumTheme.primaryText)
             Text("Added to \(successBoardTitle)")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(ColosseumTheme.secondaryText)
+                .foregroundStyle(.secondary)
                 .lineLimit(2)
         }
         .padding(14)
@@ -189,21 +199,23 @@ struct MenuBarCaptureView: View {
             HStack(alignment: .top, spacing: 12) {
                 previewThumbnail(for: draft)
                     .frame(width: 56, height: 56)
-                    .clipped()
-                    .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    )
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(draft.kindLabel.uppercased())
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
+                        .foregroundStyle(.secondary)
                     Text(draft.displayTitle)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.primaryText)
                         .lineLimit(3)
                     if case .arenaChannel(let preview) = draft {
                         Text("\(preview.blockCount) blocks · \(preview.ownerName)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(ColosseumTheme.secondaryText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -220,10 +232,10 @@ struct MenuBarCaptureView: View {
                 .scaledToFill()
         } else {
             ZStack {
-                ColosseumTheme.surface
+                Color(nsColor: .controlBackgroundColor)
                 Image(systemName: symbolName(for: draft.kind))
                     .font(.system(size: 18, weight: .light))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -237,21 +249,31 @@ struct MenuBarCaptureView: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(board.title)
-                        .font(.system(size: 13, weight: selected ? .medium : .regular))
-                        .foregroundStyle(ColosseumTheme.primaryText)
+                        .font(.system(size: 13, weight: selected ? .semibold : .regular))
                         .lineLimit(1)
                     Text("\(board.contentCount) blocks")
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(selected ? ColosseumTheme.elevated : Color.clear)
+            .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear)
+            .foregroundStyle(selected ? Color(nsColor: .selectedMenuItemTextColor) : Color.primary)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func menuButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .padding(.vertical, 4)
     }
 
     private func symbolName(for kind: BlockKind) -> String {
@@ -264,7 +286,22 @@ struct MenuBarCaptureView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Window
+
+    private func openMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        openWindow(id: "main")
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            if let window = NSApp.windows.first(where: {
+                $0.canBecomeMain && $0.styleMask.contains(.closable)
+            }) {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    // MARK: - Keys & paste
 
     private func focusInput() {
         DispatchQueue.main.async {
@@ -313,7 +350,13 @@ struct MenuBarCaptureView: View {
     }
 
     private func handleEscape() {
-        dismissPanel()
+        switch phase {
+        case .selectBoard, .notes, .committing:
+            resetToIdle(clearError: true)
+            focusInput()
+        default:
+            dismissPanel()
+        }
     }
 
     private func dismissPanel() {
@@ -324,8 +367,8 @@ struct MenuBarCaptureView: View {
         }
     }
 
-    /// Intercept ⌘V while the panel is open so the app's "Paste into Board" menu shortcut
-    /// doesn't steal it from the capture fields.
+    /// Intercept ⌘V while the panel is open so the app's "Paste into Board" menu
+    /// shortcut doesn't steal it from the capture fields.
     private func installPasteMonitor() {
         removePasteMonitor()
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -356,7 +399,7 @@ struct MenuBarCaptureView: View {
         }
     }
 
-    /// Prefer URL/text into the field; only auto-resolve true media pastes.
+    /// Prefer URL/text into the field; auto-resolve true media pastes (images/files).
     private func pasteboardHasNonTextMedia() -> Bool {
         let pb = NSPasteboard.general
 
@@ -404,6 +447,8 @@ struct MenuBarCaptureView: View {
         await resolveFromPasteboard()
     }
 
+    // MARK: - Capture
+
     private func resolveFromInput() async {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -449,6 +494,10 @@ struct MenuBarCaptureView: View {
         errorMessage = nil
         phase = .selectBoard
         focus = nil
+        // Resign the text field so arrow/enter are handled by KeyNavMonitor.
+        DispatchQueue.main.async {
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
     }
 
     private func advanceToNotes() {

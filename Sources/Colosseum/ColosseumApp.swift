@@ -4,6 +4,7 @@ import SwiftUI
 
 @main
 struct ColosseumApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     private let container: ModelContainer
 
     init() {
@@ -22,7 +23,7 @@ struct ColosseumApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        Window("Colosseum", id: "main") {
             RootView()
                 .modelContainer(container)
                 .preferredColorScheme(.dark)
@@ -130,6 +131,8 @@ extension Notification.Name {
     static let colosseumOpenFiles = Notification.Name("colosseum.openFiles")
     /// Context-sensitive ⌘O: open files on a local board, or open channel on Are.na when remote.
     static let colosseumOpenCommand = Notification.Name("colosseum.openCommand")
+    /// Show/focus the main window (menu bar Open, Dock reopen).
+    static let colosseumRevealMainWindow = Notification.Name("colosseum.revealMainWindow")
     static let colosseumArenaImport = Notification.Name("colosseum.arenaImport")
     static let colosseumImportArena = Notification.Name("colosseum.importArena")
     static let colosseumSearch = Notification.Name("colosseum.search")
