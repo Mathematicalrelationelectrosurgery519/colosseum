@@ -20,6 +20,7 @@ struct TagPill: View {
                     Rectangle()
                         .stroke(color.opacity(isSelected ? 0 : 0.55), lineWidth: 1)
                 )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .pointingHandCursor()
@@ -40,6 +41,7 @@ struct TagMatchModeToggle: View {
             Rectangle()
                 .fill(ColosseumTheme.border)
                 .frame(width: 1, height: 22)
+                .allowsHitTesting(false)
             modeButton(
                 mode: .union,
                 symbol: "∪",
@@ -49,19 +51,26 @@ struct TagMatchModeToggle: View {
         .overlay(
             Rectangle()
                 .stroke(ColosseumTheme.border, lineWidth: 1)
+                .allowsHitTesting(false)
         )
+        // Keep the toggle above the tag scroller’s hit region.
+        .zIndex(1)
     }
 
     private func modeButton(mode: TagMatchMode, symbol: String, help: String) -> some View {
         let selected = self.mode == mode
         return Button {
-            self.mode = mode
+            guard self.mode != mode else { return }
+            withAnimation(ColosseumMotion.soft) {
+                self.mode = mode
+            }
         } label: {
             Text(symbol)
                 .font(.system(size: 14, weight: .medium, design: .rounded))
                 .foregroundStyle(selected ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText)
-                .frame(width: 32, height: 26)
+                .frame(width: 34, height: 28)
                 .background(selected ? ColosseumTheme.elevated : Color.clear)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -78,6 +87,7 @@ struct TagFilterBar: View {
         if !tags.isEmpty {
             HStack(spacing: 12) {
                 TagMatchModeToggle(mode: $mode)
+                    .fixedSize()
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {

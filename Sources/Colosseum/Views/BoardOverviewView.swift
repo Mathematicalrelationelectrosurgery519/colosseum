@@ -83,9 +83,9 @@ struct BoardOverviewView: View {
                     .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
                     .animation(ColosseumMotion.standard, value: columnCount)
                 }
+                .simultaneousGesture(columnPinchGesture)
             }
             .background(ColosseumTheme.canvas)
-            .simultaneousGesture(columnPinchGesture)
 
             if let connection = selectedConnection, let block = connection.block, block.kind != .arenaChannel {
                 BlockView(
