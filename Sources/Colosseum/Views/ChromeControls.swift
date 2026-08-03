@@ -117,30 +117,109 @@ struct ColosseumHomeShortcutHintsToolbar: ToolbarContent {
     }
 }
 
-/// Board-only leading chrome (title + hints). App icon lives on RootView so it never shifts.
+struct ShortcutHintItem: Hashable {
+    let text: String
+    let help: String
+}
+
+/// Breadcrumb path: older segments fade; current is full opacity (and optionally tinted).
+struct BoardPathBreadcrumb: View {
+    let segments: [BoardPathSegment]
+    var currentColor: Color = ColosseumTheme.primaryText
+    var onSegmentTap: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+                if index > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(ColosseumTheme.tertiaryText.opacity(0.8))
+                }
+                let isCurrent = index == segments.count - 1
+                let opacity = breadcrumbOpacity(index: index, count: segments.count)
+                Text(segment.title)
+                    .font(.system(size: 13, weight: isCurrent ? .semibold : .medium))
+                    .foregroundStyle(isCurrent ? currentColor : ColosseumTheme.primaryText)
+                    .opacity(opacity)
+                    .lineLimit(1)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard !isCurrent else { return }
+                        onSegmentTap(index)
+                    }
+                    .pointingHandCursor(enabled: !isCurrent)
+                    .help(isCurrent ? segment.title : "Go to \(segment.title)")
+            }
+        }
+    }
+
+    private func breadcrumbOpacity(index: Int, count: Int) -> Double {
+        guard count > 1 else { return 1 }
+        if index == count - 1 { return 1 }
+        // Older boards sit further back.
+        let stepsFromCurrent = count - 1 - index
+        return max(0.28, 1.0 - Double(stepsFromCurrent) * 0.28)
+    }
+}
+
+/// Board-only leading chrome (path + hints). App icon lives on RootView so it never shifts.
 struct ColosseumBoardHeaderToolbar: ToolbarContent {
-    let title: String
-    var onTitleTap: () -> Void
+    let segments: [BoardPathSegment]
+    var currentColor: Color = ColosseumTheme.primaryText
+    var onSegmentTap: (Int) -> Void
+    var shortcutHints: [ShortcutHintItem] = [
+        ShortcutHintItem(text: "⌘↩", help: "Add to board"),
+        ShortcutHintItem(text: "⌘R", help: "Rename board"),
+    ]
+
+    /// Convenience for a single-title board (no nesting).
+    init(
+        title: String,
+        currentColor: Color = ColosseumTheme.primaryText,
+        onTitleTap: @escaping () -> Void,
+        shortcutHints: [ShortcutHintItem]? = nil
+    ) {
+        self.segments = [BoardPathSegment(id: "current", title: title)]
+        self.currentColor = currentColor
+        self.onSegmentTap = { _ in onTitleTap() }
+        if let shortcutHints {
+            self.shortcutHints = shortcutHints
+        }
+    }
+
+    init(
+        segments: [BoardPathSegment],
+        currentColor: Color = ColosseumTheme.primaryText,
+        onSegmentTap: @escaping (Int) -> Void,
+        shortcutHints: [ShortcutHintItem]? = nil
+    ) {
+        self.segments = segments
+        self.currentColor = currentColor
+        self.onSegmentTap = onSegmentTap
+        if let shortcutHints {
+            self.shortcutHints = shortcutHints
+        }
+    }
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             HStack(alignment: .center, spacing: 0) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ColosseumTheme.primaryText)
-                    .lineLimit(1)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onTitleTap)
-                    .pointingHandCursor()
-                    .help("Back to board overview")
+                BoardPathBreadcrumb(
+                    segments: segments,
+                    currentColor: currentColor,
+                    onSegmentTap: onSegmentTap
+                )
 
-                HStack(spacing: 10) {
-                    ShortcutHint(text: "⌘↩")
-                        .help("Add to board")
-                    ShortcutHint(text: "⌘R")
-                        .help("Rename board")
+                if !shortcutHints.isEmpty {
+                    HStack(spacing: 10) {
+                        ForEach(shortcutHints, id: \.text) { hint in
+                            ShortcutHint(text: hint.text)
+                                .help(hint.help)
+                        }
+                    }
+                    .padding(.leading, 14)
                 }
-                .padding(.leading, 14)
             }
             .frame(height: ChromeMetrics.controlHeight, alignment: .center)
         }

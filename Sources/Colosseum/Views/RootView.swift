@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var showImportArena = false
     @State private var showSearch = false
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
+    @State private var arenaStack: [ArenaBrowseTarget] = []
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
 
     var body: some View {
@@ -65,13 +66,20 @@ struct RootView: View {
             if let arenaBrowseTarget {
                 ArenaBrowserView(
                     initialTarget: arenaBrowseTarget,
+                    stack: $arenaStack,
                     destinationBoard: nil,
+                    showsInlineChrome: true,
                     onClose: {
                         withAnimation(ColosseumMotion.overlay) {
                             self.arenaBrowseTarget = nil
+                            arenaStack = []
                         }
                     },
                     onImportedBoard: { board in
+                        withAnimation(ColosseumMotion.overlay) {
+                            self.arenaBrowseTarget = nil
+                            arenaStack = []
+                        }
                         openBoard(board.id)
                     }
                 )
@@ -113,6 +121,7 @@ struct RootView: View {
                 },
                 onBrowse: { target in
                     withAnimation(ColosseumMotion.overlay) {
+                        arenaStack = [target]
                         arenaBrowseTarget = target
                     }
                 }

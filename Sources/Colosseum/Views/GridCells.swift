@@ -175,7 +175,7 @@ struct ArenaBlockCell: View {
             VStack(spacing: 6) {
                 Text(block.title)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .foregroundStyle(ColosseumTheme.remoteBoardTitle)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                 if let owner = block.arenaOwnerName {

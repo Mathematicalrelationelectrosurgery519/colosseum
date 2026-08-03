@@ -8,9 +8,11 @@ struct BoardOverviewView: View {
     @Binding var path: [UUID]
 
     @Environment(\.modelContext) private var context
+    @Query(sort: \Board.updatedAt, order: .reverse) private var allBoards: [Board]
 
     @State private var selectedConnectionID: UUID?
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
+    @State private var arenaStack: [ArenaBrowseTarget] = []
     @State private var showAddSheet = false
     @State private var showRename = false
     @State private var renameTitle = ""
@@ -35,6 +37,19 @@ struct BoardOverviewView: View {
 
     private var isBrowsingGrid: Bool {
         selectedConnectionID == nil && arenaBrowseTarget == nil
+    }
+
+    private var pathSegments: [BoardPathSegment] {
+        path.compactMap { id in
+            guard let match = allBoards.first(where: { $0.id == id }) else { return nil }
+            return BoardPathSegment(id: id.uuidString, title: match.title)
+        }
+    }
+
+    private var arenaPathSegments: [BoardPathSegment] {
+        arenaStack.map {
+            BoardPathSegment(id: $0.slug, title: $0.title?.isEmpty == false ? $0.title! : $0.slug)
+        }
     }
 
     private var tagAssignConnection: Connection? {
@@ -106,10 +121,26 @@ struct BoardOverviewView: View {
             .toolbarBackground(.visible, for: .windowToolbar)
             .toolbarColorScheme(.dark, for: .windowToolbar)
             .toolbar {
-                ColosseumBoardHeaderToolbar(
-                    title: board.title,
-                    onTitleTap: navigateBackViaTitle
-                )
+                if arenaBrowseTarget != nil {
+                    ColosseumBoardHeaderToolbar(
+                        segments: arenaPathSegments.isEmpty
+                            ? [BoardPathSegment(id: "arena", title: "Are.na")]
+                            : arenaPathSegments,
+                        currentColor: ColosseumTheme.remoteBoardTitle,
+                        onSegmentTap: jumpArenaStack(to:),
+                        shortcutHints: [
+                            ShortcutHintItem(text: "⌘O", help: "Open on Are.na"),
+                            ShortcutHintItem(text: "⌘D", help: "Import board"),
+                        ]
+                    )
+                } else {
+                    ColosseumBoardHeaderToolbar(
+                        segments: pathSegments.isEmpty
+                            ? [BoardPathSegment(id: board.id.uuidString, title: board.title)]
+                            : pathSegments,
+                        onSegmentTap: navigateToPathIndex(_:)
+                    )
+                }
                 if !availableTags.isEmpty {
                     ToolbarItem(placement: .principal) {
                         TagHeaderScroller(
@@ -127,9 +158,9 @@ struct BoardOverviewView: View {
                 ColosseumColumnSliderToolbar(
                     columnCount: $columnCount,
                     tagMatchMode: $tagMatchMode,
-                    showTagMode: !availableTags.isEmpty,
+                    showTagMode: !availableTags.isEmpty && arenaBrowseTarget == nil,
                     isImporting: isImporting,
-                    visible: isBrowsingGrid && !isAssigningTag
+                    visible: (isBrowsingGrid || arenaBrowseTarget != nil) && !isAssigningTag
                 )
             }
     }
@@ -223,7 +254,12 @@ struct BoardOverviewView: View {
             .onReceive(NotificationCenter.default.publisher(for: .colosseumPaste)) { _ in
                 Task { await paste() }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenCommand)) { _ in
+                guard arenaBrowseTarget == nil else { return }
+                openFiles()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenFiles)) { _ in
+                guard arenaBrowseTarget == nil else { return }
                 openFiles()
             }
             .alert("Import Error", isPresented: importErrorPresented) {
@@ -298,6 +334,9 @@ struct BoardOverviewView: View {
         boardKeyMonitor.onEscape = {
             if isAssigningTag {
                 endTagAssign()
+            } else if arenaBrowseTarget != nil {
+                // ArenaBrowserView owns Esc while remote is open.
+                return
             } else {
                 handleEscape()
             }
@@ -432,14 +471,19 @@ struct BoardOverviewView: View {
             if let arenaBrowseTarget {
                 ArenaBrowserView(
                     initialTarget: arenaBrowseTarget,
+                    stack: $arenaStack,
                     destinationBoard: board,
+                    showsInlineChrome: false,
                     onClose: {
                         withAnimation(ColosseumMotion.overlay) {
                             self.arenaBrowseTarget = nil
+                            arenaStack = []
                         }
                     },
                     onImportedBoard: { imported in
                         withAnimation(ColosseumMotion.overlay) {
+                            self.arenaBrowseTarget = nil
+                            arenaStack = []
                             path.append(imported.id)
                         }
                     }
@@ -681,22 +725,28 @@ struct BoardOverviewView: View {
             }
     }
 
-    private func navigateBackViaTitle() {
+    private func navigateToPathIndex(_ index: Int) {
         if selectedConnectionID != nil {
             withAnimation(ColosseumMotion.overlay) {
                 selectedConnectionID = nil
             }
-            return
         }
         if arenaBrowseTarget != nil {
             withAnimation(ColosseumMotion.overlay) {
                 arenaBrowseTarget = nil
+                arenaStack = []
             }
-            return
         }
-        guard path.count > 1 else { return }
+        guard index >= 0, index < path.count else { return }
         withAnimation(ColosseumMotion.overlay) {
-            _ = path.popLast()
+            path = Array(path.prefix(index + 1))
+        }
+    }
+
+    private func jumpArenaStack(to index: Int) {
+        guard index >= 0, index < arenaStack.count else { return }
+        withAnimation(ColosseumMotion.soft) {
+            arenaStack = Array(arenaStack.prefix(index + 1))
         }
     }
 
@@ -708,9 +758,7 @@ struct BoardOverviewView: View {
             return
         }
         if arenaBrowseTarget != nil {
-            withAnimation(ColosseumMotion.overlay) {
-                arenaBrowseTarget = nil
-            }
+            // Nested remote Esc is handled inside ArenaBrowserView.
             return
         }
         withAnimation(ColosseumMotion.overlay) {
@@ -725,8 +773,10 @@ struct BoardOverviewView: View {
     private func openArenaBrowser(for block: Block) {
         let slug = block.arenaSlug ?? ""
         guard !slug.isEmpty || block.arenaURL != nil || block.sourceURL != nil else { return }
+        let target = ArenaBrowseTarget(block: block)
         withAnimation(ColosseumMotion.overlay) {
-            arenaBrowseTarget = ArenaBrowseTarget(block: block)
+            arenaStack = [target]
+            arenaBrowseTarget = target
         }
     }
 

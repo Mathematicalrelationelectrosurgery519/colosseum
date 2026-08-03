@@ -55,10 +55,15 @@ struct ColosseumApp: App {
                 }
                 .keyboardShortcut("v", modifiers: .command)
 
-                Button("Open Files…") {
-                    NotificationCenter.default.post(name: .colosseumOpenFiles, object: nil)
+                Button("Open…") {
+                    NotificationCenter.default.post(name: .colosseumOpenCommand, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Button("Import Are.na Board") {
+                    NotificationCenter.default.post(name: .colosseumArenaImport, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: .command)
 
                 Divider()
 
@@ -92,6 +97,12 @@ struct ColosseumApp: App {
                 .keyboardShortcut("1", modifiers: .command)
             }
         }
+
+        MenuBarExtra("Colosseum Capture", systemImage: "plus.square.on.square") {
+            MenuBarCaptureView()
+                .modelContainer(container)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -102,6 +113,9 @@ extension Notification.Name {
     static let colosseumRename = Notification.Name("colosseum.rename")
     static let colosseumPaste = Notification.Name("colosseum.paste")
     static let colosseumOpenFiles = Notification.Name("colosseum.openFiles")
+    /// Context-sensitive ⌘O: open files on a local board, or open channel on Are.na when remote.
+    static let colosseumOpenCommand = Notification.Name("colosseum.openCommand")
+    static let colosseumArenaImport = Notification.Name("colosseum.arenaImport")
     static let colosseumImportArena = Notification.Name("colosseum.importArena")
     static let colosseumSearch = Notification.Name("colosseum.search")
     static let colosseumGoHome = Notification.Name("colosseum.goHome")

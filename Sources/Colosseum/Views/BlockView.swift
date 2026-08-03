@@ -183,7 +183,7 @@ struct BlockView: View {
             VStack(spacing: 12) {
                 Text(block.title)
                     .font(.title)
-                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .foregroundStyle(ColosseumTheme.remoteBoardTitle)
                 if let owner = block.arenaOwnerName {
                     Text("by \(owner)")
                         .foregroundStyle(ColosseumTheme.secondaryText)

@@ -5,33 +5,71 @@ import SwiftUI
 
 struct ArenaBrowserView: View {
     let initialTarget: ArenaBrowseTarget
+    @Binding var stack: [ArenaBrowseTarget]
     /// Local board to save individual items into (optional).
     var destinationBoard: Board?
+    /// When false, host window toolbar shows the path (board-hosted). When true, draw matching chrome inline.
+    var showsInlineChrome: Bool = true
     var onClose: () -> Void
     var onImportedBoard: ((Board) -> Void)?
 
     @Environment(\.modelContext) private var context
     @State private var model = ArenaBrowserModel()
-    @State private var stack: [ArenaBrowseTarget] = []
     @State private var selectedItem: ArenaContentItem?
     @State private var isImporting = false
     @State private var importProgress = ""
     @State private var statusMessage: String?
     @State private var hoverVideo: LoopingVideoPlayer?
     @State private var hoveringItemID: Int?
+    @State private var gridFocusID: Int?
+    @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
+    @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
+    @State private var pinchBaseColumns: Int?
+    @State private var lastPinchStep = 0
+    @State private var isPinching = false
+    @State private var pinchDidChange = false
+    @State private var suppressGridClicksUntil: Date?
 
-    private let columns = [GridItem(.adaptive(minimum: ColosseumTheme.cellMin, maximum: 260), spacing: ColosseumTheme.gridGap)]
+    private var isBrowsingGrid: Bool { selectedItem == nil }
+
+    private var columns: [GridItem] {
+        let count = min(max(columnCount, ChromeMetrics.boardColumnsMin), ChromeMetrics.boardColumnsMax)
+        return Array(
+            repeating: GridItem(.flexible(minimum: 72), spacing: ColosseumTheme.gridGap),
+            count: count
+        )
+    }
 
     private var currentTarget: ArenaBrowseTarget {
         stack.last ?? initialTarget
     }
 
+    private var pathSegments: [BoardPathSegment] {
+        let source = stack.isEmpty ? [initialTarget] : stack
+        return source.map {
+            BoardPathSegment(
+                id: $0.slug,
+                title: ($0.title?.isEmpty == false ? $0.title! : $0.slug)
+            )
+        }
+    }
+
+    private var shouldSuppressGridClicks: Bool {
+        if isPinching { return true }
+        if let until = suppressGridClicksUntil, Date() < until { return true }
+        return false
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                header
-                Divider().overlay(ColosseumTheme.border)
+                if showsInlineChrome {
+                    inlineChrome
+                    Rectangle()
+                        .fill(ColosseumTheme.border)
+                        .frame(height: 1)
+                }
                 content
             }
             .background(ColosseumTheme.canvas)
@@ -45,6 +83,7 @@ struct ArenaBrowserView: View {
                         withAnimation(ColosseumMotion.overlay) {
                             selectedItem = nil
                         }
+                        activateFocus()
                     },
                     onOpenChannel: { item in
                         guard let slug = item.channelSlug else { return }
@@ -67,9 +106,30 @@ struct ArenaBrowserView: View {
         .focused($focused)
         .focusEffectDisabled()
         .onAppear {
-            focused = true
-            stack = [initialTarget]
-            model.load(initialTarget)
+            if stack.isEmpty {
+                stack = [initialTarget]
+            }
+            model.load(currentTarget)
+            activateFocus()
+        }
+        .onDisappear { keyMonitor.remove() }
+        .onChange(of: isBrowsingGrid) { _, browsing in
+            if browsing { activateFocus() } else { keyMonitor.remove() }
+        }
+        .onChange(of: stack) { _, newStack in
+            guard let last = newStack.last else { return }
+            stopHover()
+            selectedItem = nil
+            model.load(last)
+            gridFocusID = nil
+            activateFocus()
+        }
+        .onChange(of: model.items.map(\.id)) { _, ids in
+            if let gridFocusID, !ids.contains(gridFocusID) {
+                self.gridFocusID = ids.first
+            } else if gridFocusID == nil {
+                gridFocusID = ids.first
+            }
         }
         .onExitCommand(perform: handleEscape)
         .onKeyPress(.escape) {
@@ -82,6 +142,12 @@ struct ArenaBrowserView: View {
                 .opacity(0)
                 .allowsHitTesting(false)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenCommand)) { _ in
+            openOnArena()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumArenaImport)) { _ in
+            Task { await importEntireBoard() }
+        }
         .overlay(alignment: .bottom) {
             if let statusMessage {
                 Text(statusMessage)
@@ -90,42 +156,30 @@ struct ArenaBrowserView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(ColosseumTheme.elevated)
+                    .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
                     .padding(.bottom, 20)
             }
         }
+        .highPriorityGesture(columnPinchGesture)
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            if stack.count > 1 {
-                Button {
-                    pop()
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ColosseumTheme.secondaryText)
-            }
+    private var inlineChrome: some View {
+        HStack(alignment: .center, spacing: 0) {
+            BoardPathBreadcrumb(
+                segments: pathSegments,
+                currentColor: ColosseumTheme.remoteBoardTitle,
+                onSegmentTap: jump(to:)
+            )
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(model.title)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.primaryText)
-                    Text("Are.na")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .overlay(Capsule().stroke(ColosseumTheme.border, lineWidth: 1))
-                }
-                Text(model.subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(ColosseumTheme.secondaryText)
-                    .lineLimit(1)
+            HStack(spacing: 10) {
+                ShortcutHint(text: "⌘O")
+                    .help("Open on Are.na")
+                ShortcutHint(text: "⌘D")
+                    .help("Import board")
             }
+            .padding(.leading, 14)
 
-            Spacer()
+            Spacer(minLength: 12)
 
             if isImporting {
                 ProgressView()
@@ -135,30 +189,12 @@ struct ArenaBrowserView: View {
                     .foregroundStyle(ColosseumTheme.secondaryText)
             }
 
-            if let url = model.channel?.url {
-                Button("Open on Are.na") { NSWorkspace.shared.open(url) }
-                    .buttonStyle(.bordered)
+            if isBrowsingGrid {
+                ColumnDensityControl(columnCount: $columnCount)
             }
-
-            Button("Import Board") {
-                Task { await importEntireBoard() }
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.white)
-            .foregroundStyle(.black)
-            .disabled(isImporting || model.channel == nil)
-
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ColosseumTheme.secondaryText)
-            .keyboardShortcut("w", modifiers: .command)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, ChromeMetrics.contentInset)
+        .frame(height: ChromeMetrics.controlHeight + 16)
         .background(ColosseumTheme.canvas)
     }
 
@@ -182,61 +218,125 @@ struct ArenaBrowserView: View {
                     .foregroundStyle(ColosseumTheme.secondaryText)
                     .multilineTextAlignment(.center)
                 Button("Retry") { model.load(currentTarget) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.white)
-                    .foregroundStyle(.black)
+                    .buttonStyle(ChromeButtonStyle(emphasized: true))
+                    .pointingHandCursor()
             }
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                    ForEach(model.items) { item in
-                        Button {
-                            open(item)
-                        } label: {
-                            ArenaRemoteCell(
-                                item: item,
-                                isHovering: hoveringItemID == item.id,
-                                hoverPlayer: hoveringItemID == item.id ? hoverVideo : nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .onHover { hovering in
-                            handleHover(item: item, hovering: hovering)
-                        }
-                        .onAppear {
-                            model.loadMoreIfNeeded(currentItem: item)
-                        }
-                        .contextMenu {
-                            if let destinationBoard {
-                                Button("Save to “\(destinationBoard.title)”") {
-                                    Task { await save(item, to: destinationBoard) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                        ForEach(model.items) { item in
+                            Button {
+                                guard !shouldSuppressGridClicks else { return }
+                                gridFocusID = item.id
+                                open(item)
+                            } label: {
+                                ArenaRemoteCell(
+                                    item: item,
+                                    isHovering: hoveringItemID == item.id,
+                                    hoverPlayer: hoveringItemID == item.id ? hoverVideo : nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .id(item.id)
+                            .overlay {
+                                if item.id == gridFocusID, isBrowsingGrid {
+                                    Rectangle()
+                                        .stroke(Color.white.opacity(0.85), lineWidth: 2)
+                                        .allowsHitTesting(false)
                                 }
                             }
-                            if item.kind == .channel {
-                                Button("Browse Channel") { open(item) }
+                            .pointingHandCursor()
+                            .onHover { hovering in
+                                handleHover(item: item, hovering: hovering)
                             }
-                            if let urlString = item.previewURL ?? item.sourceURL,
-                               let url = URL(string: urlString) {
-                                Button("Open Original") { NSWorkspace.shared.open(url) }
+                            .onAppear {
+                                model.loadMoreIfNeeded(currentItem: item)
+                            }
+                            .contextMenu {
+                                if let destinationBoard {
+                                    Button("Save to “\(destinationBoard.title)”") {
+                                        Task { await save(item, to: destinationBoard) }
+                                    }
+                                }
+                                if item.kind == .channel {
+                                    Button("Browse Channel") { open(item) }
+                                }
+                                if let urlString = item.previewURL ?? item.sourceURL,
+                                   let url = URL(string: urlString) {
+                                    Button("Open Original") { NSWorkspace.shared.open(url) }
+                                }
                             }
                         }
                     }
-                }
-                .padding(28)
+                    .padding(28)
+                    .animation(ColosseumMotion.standard, value: columnCount)
+                    .allowsHitTesting(!isPinching)
 
-                if model.isLoadingMore {
-                    ProgressView()
-                        .padding(.bottom, 28)
-                } else if model.hasMore {
-                    Button("Load more") {
-                        model.loadMoreIfNeeded(currentItem: nil)
+                    if model.isLoadingMore {
+                        ProgressView()
+                            .padding(.bottom, 28)
                     }
-                    .padding(.bottom, 28)
+                }
+                .onChange(of: gridFocusID) { _, id in
+                    guard let id, isBrowsingGrid else { return }
+                    withAnimation(ColosseumMotion.soft) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
                 }
             }
         }
+    }
+
+    private func activateFocus() {
+        focused = true
+        installKeyMonitor()
+        DispatchQueue.main.async {
+            focused = true
+            if gridFocusID == nil {
+                gridFocusID = model.items.first?.id
+            }
+        }
+    }
+
+    private func installKeyMonitor() {
+        keyMonitor.onLeft = { moveGridFocus(delta: -1) }
+        keyMonitor.onRight = { moveGridFocus(delta: 1) }
+        keyMonitor.onUp = { moveGridFocus(delta: -columnCount) }
+        keyMonitor.onDown = { moveGridFocus(delta: columnCount) }
+        keyMonitor.onEnter = { activateFocusedItem() }
+        keyMonitor.onEscape = { handleEscape() }
+        keyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
+        keyMonitor.install()
+    }
+
+    private func moveGridFocus(delta: Int) {
+        guard isBrowsingGrid else { return }
+        let items = model.items
+        guard !items.isEmpty else { return }
+        focused = true
+        if let idx = items.firstIndex(where: { $0.id == gridFocusID }) {
+            let next = idx + delta
+            guard next >= 0, next < items.count else { return }
+            withAnimation(ColosseumMotion.soft) {
+                gridFocusID = items[next].id
+            }
+        } else {
+            withAnimation(ColosseumMotion.soft) {
+                gridFocusID = items[0].id
+            }
+        }
+    }
+
+    private func activateFocusedItem() {
+        guard isBrowsingGrid else { return }
+        let items = model.items
+        let target = items.first(where: { $0.id == gridFocusID }) ?? items.first
+        guard let item = target else { return }
+        gridFocusID = item.id
+        open(item)
     }
 
     private func open(_ item: ArenaContentItem) {
@@ -254,7 +354,13 @@ struct ArenaBrowserView: View {
     private func push(_ target: ArenaBrowseTarget) {
         stopHover()
         stack.append(target)
-        model.load(target)
+    }
+
+    private func jump(to index: Int) {
+        guard index >= 0, index < stack.count else { return }
+        withAnimation(ColosseumMotion.soft) {
+            stack = Array(stack.prefix(index + 1))
+        }
     }
 
     private func pop() {
@@ -263,9 +369,8 @@ struct ArenaBrowserView: View {
             onClose()
             return
         }
-        withAnimation(ColosseumMotion.soft) {
+        _ = withAnimation(ColosseumMotion.soft) {
             stack.removeLast()
-            model.load(currentTarget)
         }
     }
 
@@ -274,11 +379,18 @@ struct ArenaBrowserView: View {
             withAnimation(ColosseumMotion.overlay) {
                 selectedItem = nil
             }
-        } else if stack.count > 1 {
+            return
+        }
+        if stack.count > 1 {
             pop()
         } else {
             onClose()
         }
+    }
+
+    private func openOnArena() {
+        guard let url = model.channel?.url else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func handleHover(item: ArenaContentItem, hovering: Bool) {
@@ -334,6 +446,44 @@ struct ArenaBrowserView: View {
             statusMessage = error.localizedDescription
         }
     }
+
+    private var columnPinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                guard isBrowsingGrid else { return }
+                if pinchBaseColumns == nil {
+                    isPinching = true
+                    pinchDidChange = false
+                    pinchBaseColumns = columnCount
+                    lastPinchStep = 0
+                }
+                if abs(value - 1) > 0.04 {
+                    pinchDidChange = true
+                }
+                let step = Int(((value - 1) / ChromeMetrics.pinchStepThreshold).rounded(.towardZero))
+                guard step != lastPinchStep, let base = pinchBaseColumns else { return }
+                lastPinchStep = step
+                pinchDidChange = true
+                let next = min(
+                    max(base - step, ChromeMetrics.boardColumnsMin),
+                    ChromeMetrics.boardColumnsMax
+                )
+                if next != columnCount {
+                    withAnimation(ColosseumMotion.standard) {
+                        columnCount = next
+                    }
+                }
+            }
+            .onEnded { _ in
+                if pinchDidChange {
+                    suppressGridClicksUntil = Date().addingTimeInterval(0.35)
+                }
+                isPinching = false
+                pinchDidChange = false
+                pinchBaseColumns = nil
+                lastPinchStep = 0
+            }
+    }
 }
 
 // MARK: - Grid cell
@@ -344,56 +494,54 @@ private struct ArenaRemoteCell: View {
     var hoverPlayer: LoopingVideoPlayer?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .bottomTrailing) {
-                Group {
-                    if item.isVideo, isHovering, let hoverPlayer {
-                        PlayerView(player: hoverPlayer.player, showsControls: false)
-                            .allowsHitTesting(false)
-                    } else if item.kind == .text {
-                        textCard
-                    } else if item.kind == .channel {
-                        channelCard
-                    } else if let urlString = item.gridImageURL, let url = URL(string: urlString) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFit()
-                            case .failure:
-                                placeholder(systemName: "photo")
-                            case .empty:
-                                ProgressView().controlSize(.small)
-                            @unknown default:
-                                placeholder(systemName: "photo")
-                            }
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if item.isVideo, isHovering, let hoverPlayer {
+                    PlayerView(player: hoverPlayer.player, showsControls: false)
+                        .allowsHitTesting(false)
+                } else if item.kind == .text {
+                    textCard
+                } else if item.kind == .channel {
+                    channelCard
+                } else if let urlString = item.gridImageURL, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                        case .failure:
+                            placeholder(systemName: "photo")
+                        case .empty:
+                            ProgressView().controlSize(.small)
+                        @unknown default:
+                            placeholder(systemName: "photo")
                         }
-                    } else if item.kind == .link {
-                        placeholder(systemName: "link")
-                    } else {
-                        placeholder(systemName: "square.dashed")
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .aspectRatio(1, contentMode: .fit)
-                .clipped()
-                .background(ColosseumTheme.surface)
-
-                if item.isVideo, !isHovering {
-                    Image(systemName: "play.rectangle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(8)
+                } else if item.kind == .link {
+                    placeholder(systemName: "link")
+                } else {
+                    placeholder(systemName: "square.dashed")
                 }
             }
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: item.kind == .channel || item.kind == .text ? 1 : 0.5))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .aspectRatio(1, contentMode: .fit)
+            .clipped()
+            .background(ColosseumTheme.surface)
 
-            Text(item.displayTitle)
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
-                .lineLimit(1)
+            if item.isVideo, !isHovering {
+                Image(systemName: "play.rectangle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(8)
+            }
         }
+        .overlay(
+            Rectangle().stroke(
+                ColosseumTheme.border,
+                lineWidth: item.kind == .channel || item.kind == .text ? 1 : 0.5
+            )
+        )
     }
 
     private var textCard: some View {
@@ -410,7 +558,7 @@ private struct ArenaRemoteCell: View {
         VStack(spacing: 6) {
             Text(item.displayTitle)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(ColosseumTheme.primaryText)
+                .foregroundStyle(ColosseumTheme.remoteBoardTitle)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
             if let owner = item.channelOwnerName {
@@ -449,6 +597,7 @@ private struct ArenaRemoteItemView: View {
     @State private var loopingPlayer: LoopingVideoPlayer?
     @State private var isSaving = false
     @State private var statusMessage: String?
+    @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
 
     private var index: Int {
@@ -473,41 +622,27 @@ private struct ArenaRemoteItemView: View {
         .onAppear {
             focused = true
             reloadPlayer()
+            keyMonitor.onLeft = { step(-1) }
+            keyMonitor.onRight = { step(1) }
+            keyMonitor.onEscape = onClose
+            keyMonitor.install()
         }
+        .onDisappear { keyMonitor.remove() }
         .onChange(of: selected?.id) { _, _ in
             focused = true
             reloadPlayer()
         }
         .onExitCommand(perform: onClose)
-        .onKeyPress(.escape) {
-            onClose()
-            return .handled
-        }
-        .onKeyPress(.leftArrow) {
-            step(-1)
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            step(1)
-            return .handled
-        }
-        .onMoveCommand { direction in
-            switch direction {
-            case .left: step(-1)
-            case .right: step(1)
-            default: break
+        .overlay(alignment: .bottom) {
+            HStack(spacing: 10) {
+                ShortcutHint(text: "←")
+                ShortcutHint(text: "→")
+                ShortcutHint(text: "esc")
             }
-        }
-        // Keep arrow keys working even when AVPlayerView steals focus.
-        .background {
-            HStack {
-                Button("", action: { step(-1) })
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                Button("", action: { step(1) })
-                    .keyboardShortcut(.rightArrow, modifiers: [])
-            }
-            .opacity(0)
-            .allowsHitTesting(false)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -553,14 +688,15 @@ private struct ArenaRemoteItemView: View {
                     }
                 case .channel:
                     VStack(spacing: 12) {
-                        Text(item.displayTitle).font(.title)
+                        Text(item.displayTitle)
+                            .font(.title)
+                            .foregroundStyle(ColosseumTheme.remoteBoardTitle)
                         if let owner = item.channelOwnerName {
                             Text("by \(owner)").foregroundStyle(ColosseumTheme.secondaryText)
                         }
                         Button("Browse Channel") { onOpenChannel(item) }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.white)
-                            .foregroundStyle(.black)
+                            .buttonStyle(ChromeButtonStyle(emphasized: true))
+                            .pointingHandCursor()
                     }
                 }
             }
@@ -572,25 +708,32 @@ private struct ArenaRemoteItemView: View {
             HStack(spacing: 12) {
                 Spacer()
                 Button { step(-1) } label: { Image(systemName: "chevron.left") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ChromeIconButtonStyle())
                     .disabled(items.isEmpty || index <= 0)
                     .help("Previous")
+                    .pointingHandCursor()
                 Button { step(1) } label: { Image(systemName: "chevron.right") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ChromeIconButtonStyle())
                     .disabled(items.isEmpty || index >= items.count - 1)
                     .help("Next")
+                    .pointingHandCursor()
                 Button(action: onClose) { Image(systemName: "xmark") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ChromeIconButtonStyle())
+                    .pointingHandCursor()
             }
-            .foregroundStyle(ColosseumTheme.secondaryText)
-            .padding(16)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
             if let item {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         Text(item.displayTitle)
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(ColosseumTheme.primaryText)
+                            .foregroundStyle(
+                                item.kind == .channel
+                                    ? ColosseumTheme.remoteBoardTitle
+                                    : ColosseumTheme.primaryText
+                            )
 
                         if !item.notes.isEmpty {
                             Text(item.notes)
@@ -621,13 +764,12 @@ private struct ArenaRemoteItemView: View {
                                 Button(isSaving ? "Saving…" : "Save to Board") {
                                     Task { await save(item, to: destinationBoard) }
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.white)
-                                .foregroundStyle(.black)
+                                .buttonStyle(ChromeButtonStyle(emphasized: true))
                                 .disabled(isSaving)
+                                .pointingHandCursor()
                             }
 
-                            Menu("Actions") {
+                            Menu {
                                 if let urlString = item.previewURL ?? item.sourceURL,
                                    let url = URL(string: urlString) {
                                     Button("Open Original") { NSWorkspace.shared.open(url) }
@@ -635,7 +777,11 @@ private struct ArenaRemoteItemView: View {
                                 if let urlString = item.sourceURL, let url = URL(string: urlString) {
                                     Button("Open Source URL") { NSWorkspace.shared.open(url) }
                                 }
+                            } label: {
+                                Text("Actions")
                             }
+                            .buttonStyle(ChromeButtonStyle())
+                            .pointingHandCursor()
                         }
 
                         if let statusMessage {
@@ -681,9 +827,8 @@ private struct ArenaRemoteItemView: View {
                 .foregroundStyle(ColosseumTheme.primaryText)
             if let source = item.sourceURL, let url = URL(string: source) {
                 Button("Open Link") { NSWorkspace.shared.open(url) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.white)
-                    .foregroundStyle(.black)
+                    .buttonStyle(ChromeButtonStyle(emphasized: true))
+                    .pointingHandCursor()
             }
         }
     }

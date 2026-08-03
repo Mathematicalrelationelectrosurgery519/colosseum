@@ -8,9 +8,17 @@ enum ColosseumTheme {
     static let primaryText = Color.white
     static let secondaryText = Color.white.opacity(0.55)
     static let tertiaryText = Color.white.opacity(0.35)
+    /// Titles for remote / Are.na boards.
+    static let remoteBoardTitle = Color(red: 1.0, green: 0.70, blue: 0.42)
     static let gridGap: CGFloat = 16
     static let cellMin: CGFloat = 180
     static let sidebarWidth: CGFloat = 320
+}
+
+/// A segment in a board / remote breadcrumb path.
+struct BoardPathSegment: Identifiable, Hashable {
+    let id: String
+    let title: String
 }
 
 extension View {

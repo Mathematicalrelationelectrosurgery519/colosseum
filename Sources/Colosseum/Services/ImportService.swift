@@ -3,6 +3,81 @@ import Foundation
 import SwiftData
 import UniformTypeIdentifiers
 
+/// In-memory capture ready to preview, then commit onto a board.
+enum CaptureDraft {
+    case arenaChannel(ArenaChannelPreview)
+    case remote(RemoteMediaResult)
+    case pastedImage(Data)
+    case text(String)
+    case localFile(URL)
+
+    var displayTitle: String {
+        switch self {
+        case .arenaChannel(let preview):
+            return preview.title.isEmpty ? preview.slug : preview.title
+        case .remote(let remote):
+            return remote.title.isEmpty ? remote.sourceURL.absoluteString : remote.title
+        case .pastedImage:
+            return "Pasted image"
+        case .text(let body):
+            let first = body.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+            return first.isEmpty ? "Text" : first
+        case .localFile(let url):
+            return url.deletingPathExtension().lastPathComponent
+        }
+    }
+
+    var kind: BlockKind {
+        switch self {
+        case .arenaChannel: return .arenaChannel
+        case .remote(let remote):
+            switch remote.kind {
+            case .image: return .image
+            case .video: return .video
+            case .link: return .link
+            }
+        case .pastedImage: return .image
+        case .text: return .text
+        case .localFile(let url):
+            let type = UTType(filenameExtension: url.pathExtension.lowercased())
+            if let type, type.conforms(to: .image) { return .image }
+            if let type, type.conforms(to: .movie) || type.conforms(to: .audiovisualContent) {
+                return .video
+            }
+            return .link
+        }
+    }
+
+    var kindLabel: String {
+        switch kind {
+        case .image: return "Image"
+        case .video: return "Video"
+        case .link: return "Link"
+        case .text: return "Text"
+        case .arenaChannel: return "Are.na"
+        }
+    }
+
+    @MainActor
+    var previewImage: NSImage? {
+        switch self {
+        case .remote(let remote) where remote.kind == .image:
+            guard let data = remote.data else { return nil }
+            return NSImage(data: data)
+        case .pastedImage(let data):
+            return NSImage(data: data)
+        case .localFile(let url):
+            let type = UTType(filenameExtension: url.pathExtension.lowercased())
+            if let type, type.conforms(to: .image) {
+                return NSImage(contentsOf: url)
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+}
+
 @MainActor
 enum ImportService {
     enum ImportError: LocalizedError {
@@ -36,6 +111,179 @@ enum ImportService {
         board.updatedAt = .now
     }
 
+    // MARK: - Resolve / commit
+
+    static func resolveURLString(_ string: String) async throws -> CaptureDraft {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw ImportError.failed("Empty URL") }
+
+        if ArenaService.isArenaChannelURL(trimmed) {
+            let preview = try await ArenaService.fetchFromURLString(trimmed)
+            return .arenaChannel(preview)
+        }
+
+        let remote = try await URLImportService.fetch(trimmed)
+        return .remote(remote)
+    }
+
+    /// Resolves a single item from the pasteboard for preview. Multiple local files
+    /// are not supported here — use `importPasteboard` / `importFiles` instead.
+    static func resolvePasteboard() async throws -> CaptureDraft {
+        let pb = NSPasteboard.general
+
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
+            let fileURLs = urls.filter { $0.isFileURL }
+            if let first = fileURLs.first {
+                return .localFile(first)
+            }
+            if let url = urls.first(where: { !$0.isFileURL }) {
+                return try await resolveURLString(url.absoluteString)
+            }
+        }
+
+        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+           let image = images.first,
+           let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let data = rep.representation(using: .png, properties: [:]) {
+            return .pastedImage(data)
+        }
+
+        if let string = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !string.isEmpty {
+            if string.hasPrefix("http://") || string.hasPrefix("https://") {
+                return try await resolveURLString(string)
+            }
+            return .text(string)
+        }
+
+        throw ImportError.failed("Nothing to paste")
+    }
+
+    static func commit(
+        _ draft: CaptureDraft,
+        notes: String = "",
+        into board: Board,
+        context: ModelContext
+    ) async throws {
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch draft {
+        case .arenaChannel(let preview):
+            let block = Block(
+                kind: .arenaChannel,
+                title: preview.title,
+                notes: trimmedNotes,
+                sourceURL: preview.url.absoluteString,
+                arenaSlug: preview.slug,
+                arenaURL: preview.url.absoluteString,
+                arenaOwnerName: preview.ownerName,
+                arenaBlockCount: preview.blockCount,
+                arenaUpdatedAt: preview.updatedAt
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+
+        case .remote(let remote):
+            try await commitRemote(remote, notes: trimmedNotes, into: board, context: context)
+
+        case .pastedImage(let data):
+            let blockID = UUID()
+            let dest = try MediaLibrary.writeData(data, into: blockID, filename: "pasteboard.png")
+            let (w, h) = ThumbnailService.imageDimensions(at: dest)
+            let thumb = try ThumbnailService.generateImageThumbnail(from: dest, blockID: blockID)
+            let block = Block(
+                id: blockID,
+                kind: .image,
+                title: "Pasted image",
+                notes: trimmedNotes,
+                localRelativePath: MediaLibrary.relativePath(from: dest),
+                thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
+                mimeType: "image/png",
+                byteSize: Int64(data.count),
+                width: w,
+                height: h
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+
+        case .text(let body):
+            let block = Block(kind: .text, title: "", notes: trimmedNotes, textBody: body)
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+
+        case .localFile(let url):
+            try await importFile(url, notes: trimmedNotes, into: board, context: context)
+        }
+    }
+
+    private static func commitRemote(
+        _ remote: RemoteMediaResult,
+        notes: String,
+        into board: Board,
+        context: ModelContext
+    ) async throws {
+        let blockID = UUID()
+
+        switch remote.kind {
+        case .image:
+            guard let data = remote.data else { throw ImportError.failed("Empty image data") }
+            let dest = try MediaLibrary.writeData(data, into: blockID, filename: remote.filename)
+            let (w, h) = ThumbnailService.imageDimensions(at: dest)
+            let thumb = try ThumbnailService.generateImageThumbnail(from: dest, blockID: blockID)
+            let block = Block(
+                id: blockID,
+                kind: .image,
+                title: remote.title,
+                notes: notes,
+                sourceURL: remote.sourceURL.absoluteString,
+                localRelativePath: MediaLibrary.relativePath(from: dest),
+                thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
+                mimeType: remote.mimeType,
+                byteSize: Int64(data.count),
+                width: w,
+                height: h
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+
+        case .video:
+            guard let data = remote.data else { throw ImportError.failed("Empty video data") }
+            let dest = try MediaLibrary.writeData(data, into: blockID, filename: remote.filename)
+            let meta = await ThumbnailService.videoMetadata(at: dest)
+            let thumb = try await ThumbnailService.generateVideoThumbnail(from: dest, blockID: blockID)
+            let block = Block(
+                id: blockID,
+                kind: .video,
+                title: remote.title,
+                notes: notes,
+                sourceURL: remote.sourceURL.absoluteString,
+                localRelativePath: MediaLibrary.relativePath(from: dest),
+                thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
+                mimeType: remote.mimeType,
+                byteSize: Int64(data.count),
+                width: meta.width,
+                height: meta.height,
+                duration: meta.duration
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+
+        case .link:
+            let block = Block(
+                kind: .link,
+                title: remote.title,
+                notes: notes,
+                sourceURL: remote.sourceURL.absoluteString,
+                mimeType: remote.mimeType
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+        }
+    }
+
+    // MARK: - Existing entry points
+
     static func importFiles(_ urls: [URL], into board: Board, context: ModelContext) async throws {
         for url in urls {
             let accessed = url.startAccessingSecurityScopedResource()
@@ -45,6 +293,15 @@ enum ImportService {
     }
 
     static func importFile(_ url: URL, into board: Board, context: ModelContext) async throws {
+        try await importFile(url, notes: "", into: board, context: context)
+    }
+
+    private static func importFile(
+        _ url: URL,
+        notes: String,
+        into board: Board,
+        context: ModelContext
+    ) async throws {
         let type = UTType(filenameExtension: url.pathExtension.lowercased())
         let blockID = UUID()
 
@@ -58,6 +315,7 @@ enum ImportService {
                 id: blockID,
                 kind: .image,
                 title: url.deletingPathExtension().lastPathComponent,
+                notes: notes,
                 sourceURL: url.absoluteString,
                 localRelativePath: MediaLibrary.relativePath(from: dest),
                 thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
@@ -83,6 +341,7 @@ enum ImportService {
                 id: blockID,
                 kind: .video,
                 title: url.deletingPathExtension().lastPathComponent,
+                notes: notes,
                 sourceURL: url.absoluteString,
                 localRelativePath: MediaLibrary.relativePath(from: dest),
                 thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
@@ -103,79 +362,8 @@ enum ImportService {
     static func importURLString(_ string: String, into board: Board, context: ModelContext) async throws {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-
-        if ArenaService.isArenaChannelURL(trimmed) {
-            let preview = try await ArenaService.fetchFromURLString(trimmed)
-            let block = Block(
-                kind: .arenaChannel,
-                title: preview.title,
-                sourceURL: preview.url.absoluteString,
-                arenaSlug: preview.slug,
-                arenaURL: preview.url.absoluteString,
-                arenaOwnerName: preview.ownerName,
-                arenaBlockCount: preview.blockCount,
-                arenaUpdatedAt: preview.updatedAt
-            )
-            context.insert(block)
-            connect(block: block, to: board, context: context)
-            return
-        }
-
-        let remote = try await URLImportService.fetch(trimmed)
-        let blockID = UUID()
-
-        switch remote.kind {
-        case .image:
-            guard let data = remote.data else { throw ImportError.failed("Empty image data") }
-            let dest = try MediaLibrary.writeData(data, into: blockID, filename: remote.filename)
-            let (w, h) = ThumbnailService.imageDimensions(at: dest)
-            let thumb = try ThumbnailService.generateImageThumbnail(from: dest, blockID: blockID)
-            let block = Block(
-                id: blockID,
-                kind: .image,
-                title: remote.title,
-                sourceURL: remote.sourceURL.absoluteString,
-                localRelativePath: MediaLibrary.relativePath(from: dest),
-                thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
-                mimeType: remote.mimeType,
-                byteSize: Int64(data.count),
-                width: w,
-                height: h
-            )
-            context.insert(block)
-            connect(block: block, to: board, context: context)
-
-        case .video:
-            guard let data = remote.data else { throw ImportError.failed("Empty video data") }
-            let dest = try MediaLibrary.writeData(data, into: blockID, filename: remote.filename)
-            let meta = await ThumbnailService.videoMetadata(at: dest)
-            let thumb = try await ThumbnailService.generateVideoThumbnail(from: dest, blockID: blockID)
-            let block = Block(
-                id: blockID,
-                kind: .video,
-                title: remote.title,
-                sourceURL: remote.sourceURL.absoluteString,
-                localRelativePath: MediaLibrary.relativePath(from: dest),
-                thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
-                mimeType: remote.mimeType,
-                byteSize: Int64(data.count),
-                width: meta.width,
-                height: meta.height,
-                duration: meta.duration
-            )
-            context.insert(block)
-            connect(block: block, to: board, context: context)
-
-        case .link:
-            let block = Block(
-                kind: .link,
-                title: remote.title,
-                sourceURL: remote.sourceURL.absoluteString,
-                mimeType: remote.mimeType
-            )
-            context.insert(block)
-            connect(block: block, to: board, context: context)
-        }
+        let draft = try await resolveURLString(trimmed)
+        try await commit(draft, into: board, context: context)
     }
 
     static func importPasteboard(into board: Board, context: ModelContext) async throws {
@@ -193,42 +381,8 @@ enum ImportService {
             return
         }
 
-        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-           let image = images.first,
-           let tiff = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiff),
-           let data = rep.representation(using: .png, properties: [:]) {
-            let blockID = UUID()
-            let dest = try MediaLibrary.writeData(data, into: blockID, filename: "pasteboard.png")
-            let (w, h) = ThumbnailService.imageDimensions(at: dest)
-            let thumb = try ThumbnailService.generateImageThumbnail(from: dest, blockID: blockID)
-            let block = Block(
-                id: blockID,
-                kind: .image,
-                title: "Pasted image",
-                localRelativePath: MediaLibrary.relativePath(from: dest),
-                thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
-                mimeType: "image/png",
-                byteSize: Int64(data.count),
-                width: w,
-                height: h
-            )
-            context.insert(block)
-            connect(block: block, to: board, context: context)
-            return
-        }
-
-        if let string = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !string.isEmpty {
-            if string.hasPrefix("http://") || string.hasPrefix("https://") {
-                try await importURLString(string, into: board, context: context)
-            } else {
-                addTextBlock(string, title: "", into: board, context: context)
-            }
-            return
-        }
-
-        throw ImportError.failed("Nothing to paste")
+        let draft = try await resolvePasteboard()
+        try await commit(draft, into: board, context: context)
     }
 
     static func addTextBlock(_ body: String, title: String, into board: Board, context: ModelContext) {
