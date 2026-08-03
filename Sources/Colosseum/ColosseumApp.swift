@@ -35,12 +35,15 @@ struct ColosseumApp: App {
                 Button("New Board") {
                     NotificationCenter.default.post(name: .colosseumNewBoard, object: nil)
                 }
-                .keyboardShortcut(.return, modifiers: .command)
 
                 Button("Add to Board…") {
                     NotificationCenter.default.post(name: .colosseumAdd, object: nil)
                 }
-                .keyboardShortcut("n", modifiers: .command)
+
+                Button("New Board or Add") {
+                    NotificationCenter.default.post(name: .colosseumCommandReturn, object: nil)
+                }
+                .keyboardShortcut(.return, modifiers: .command)
 
                 Button("Rename Board…") {
                     NotificationCenter.default.post(name: .colosseumRename, object: nil)
@@ -95,6 +98,7 @@ struct ColosseumApp: App {
 extension Notification.Name {
     static let colosseumNewBoard = Notification.Name("colosseum.newBoard")
     static let colosseumAdd = Notification.Name("colosseum.add")
+    static let colosseumCommandReturn = Notification.Name("colosseum.commandReturn")
     static let colosseumRename = Notification.Name("colosseum.rename")
     static let colosseumPaste = Notification.Name("colosseum.paste")
     static let colosseumOpenFiles = Notification.Name("colosseum.openFiles")

@@ -135,7 +135,7 @@ struct ColosseumBoardHeaderToolbar: ToolbarContent {
                     .help("Back to board overview")
 
                 HStack(spacing: 10) {
-                    ShortcutHint(text: "⌘N")
+                    ShortcutHint(text: "⌘↩")
                         .help("Add to board")
                     ShortcutHint(text: "⌘R")
                         .help("Rename board")
@@ -180,20 +180,25 @@ struct ColumnDensityControl: View {
 
 struct ColosseumColumnSliderToolbar: ToolbarContent {
     @Binding var columnCount: Int
+    @Binding var tagMatchMode: TagMatchMode
+    var showTagMode = false
     var isImporting = false
     var visible = true
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 if isImporting {
                     ProgressView().controlSize(.small)
                 }
+                if showTagMode {
+                    TagMatchModeIcon(mode: $tagMatchMode)
+                }
                 ColumnDensityControl(columnCount: $columnCount)
-                    .opacity(visible ? 1 : 0)
-                    .allowsHitTesting(visible)
-                    .animation(ColosseumMotion.overlay, value: visible)
             }
+            .opacity(visible ? 1 : 0)
+            .allowsHitTesting(visible)
+            .animation(ColosseumMotion.overlay, value: visible)
             // System toolbar already insets a bit; pad the rest to match grid content (28).
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }

@@ -18,6 +18,7 @@ struct BoardOverviewView: View {
     @State private var errorMessage: String?
     @State private var isTargeted = false
     @State private var selectedTags: Set<String> = []
+    @State private var tagSelectionOrder: [String] = []
     @State private var tagMatchMode: TagMatchMode = .intersection
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
     @State private var pinchBaseColumns: Int?
@@ -83,8 +84,23 @@ struct BoardOverviewView: View {
                     title: board.title,
                     onTitleTap: navigateBackViaTitle
                 )
+                if !availableTags.isEmpty {
+                    ToolbarItem(placement: .principal) {
+                        TagHeaderScroller(
+                            tags: availableTags,
+                            selected: $selectedTags,
+                            selectionOrder: $tagSelectionOrder
+                        )
+                        .opacity(isBrowsingGrid ? 1 : 0)
+                        .allowsHitTesting(isBrowsingGrid)
+                        .animation(ColosseumMotion.overlay, value: isBrowsingGrid)
+                    }
+                    .colosseumPlainToolbarItem()
+                }
                 ColosseumColumnSliderToolbar(
                     columnCount: $columnCount,
+                    tagMatchMode: $tagMatchMode,
+                    showTagMode: !availableTags.isEmpty,
                     isImporting: isImporting,
                     visible: isBrowsingGrid
                 )
@@ -151,6 +167,11 @@ struct BoardOverviewView: View {
             .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenFiles)) { _ in
                 openFiles()
             }
+            .onChange(of: availableTags) { _, tags in
+                let keys = Set(tags.map { TagParser.normalize($0) })
+                selectedTags = selectedTags.intersection(keys)
+                tagSelectionOrder = tagSelectionOrder.filter { keys.contains($0) }
+            }
             .alert("Import Error", isPresented: importErrorPresented) {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: {
@@ -160,8 +181,6 @@ struct BoardOverviewView: View {
 
     private var boardKeyEquivalents: some View {
         Group {
-            Button("") { showAddSheet = true }
-                .keyboardShortcut("n", modifiers: .command)
             Button("") {
                 renameTitle = board.title
                 showRename = true
@@ -183,6 +202,12 @@ struct BoardOverviewView: View {
         }
     }
 
+    private func selectOnlyTag(_ tag: String) {
+        let key = TagParser.normalize(tag)
+        selectedTags = [key]
+        tagSelectionOrder = [key]
+    }
+
     private var boardStack: some View {
         ZStack {
             boardGrid
@@ -201,7 +226,7 @@ struct BoardOverviewView: View {
                     onTagTap: { tag in
                         withAnimation(ColosseumMotion.overlay) {
                             selectedConnectionID = nil
-                            selectedTags = [TagParser.normalize(tag)]
+                            selectOnlyTag(tag)
                         }
                     }
                 )
@@ -231,41 +256,31 @@ struct BoardOverviewView: View {
     }
 
     private var boardGrid: some View {
-        VStack(spacing: 0) {
-            TagFilterBar(
-                tags: availableTags,
-                selected: $selectedTags,
-                mode: $tagMatchMode
-            )
-            .animation(ColosseumMotion.soft, value: availableTags)
-
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                    Button {
-                        guard !shouldSuppressGridClicks else { return }
-                        showAddSheet = true
-                    } label: {
-                        AddBlockCell()
-                    }
-                    .buttonStyle(.plain)
-                    .pointingHandCursor()
-
-                    ForEach(filteredConnections, id: \.id) { connection in
-                        connectionCell(connection)
-                            .pointingHandCursor()
-                            .transition(ColosseumMotion.itemTransition)
-                    }
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                Button {
+                    guard !shouldSuppressGridClicks else { return }
+                    showAddSheet = true
+                } label: {
+                    AddBlockCell()
                 }
-                .padding(28)
-                .padding(.top, availableTags.isEmpty ? 0 : 8)
-                .animation(ColosseumMotion.standard, value: selectedTags)
-                .animation(ColosseumMotion.standard, value: tagMatchMode)
-                .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
-                .animation(ColosseumMotion.standard, value: columnCount)
-                .allowsHitTesting(!isPinching)
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+
+                ForEach(filteredConnections, id: \.id) { connection in
+                    connectionCell(connection)
+                        .pointingHandCursor()
+                        .transition(ColosseumMotion.itemTransition)
+                }
             }
-            .highPriorityGesture(columnPinchGesture)
+            .padding(28)
+            .animation(ColosseumMotion.standard, value: selectedTags)
+            .animation(ColosseumMotion.standard, value: tagMatchMode)
+            .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
+            .animation(ColosseumMotion.standard, value: columnCount)
+            .allowsHitTesting(!isPinching)
         }
+        .highPriorityGesture(columnPinchGesture)
     }
 
     @ViewBuilder

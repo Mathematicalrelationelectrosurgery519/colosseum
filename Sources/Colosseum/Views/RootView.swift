@@ -122,6 +122,14 @@ struct RootView: View {
             newBoardTitle = ""
             showNewBoardAlert = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumCommandReturn)) { _ in
+            if path.isEmpty {
+                newBoardTitle = ""
+                showNewBoardAlert = true
+            } else {
+                NotificationCenter.default.post(name: .colosseumAdd, object: nil)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumImportArena)) { _ in
             showImportArena = true
         }

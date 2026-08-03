@@ -12,14 +12,7 @@ struct TagPill: View {
         Button(action: action) {
             Text(TagParser.displayLabel(tag))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isSelected ? Color.black : color)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(isSelected ? color : color.opacity(0.14))
-                .overlay(
-                    Rectangle()
-                        .stroke(color.opacity(isSelected ? 0 : 0.55), lineWidth: 1)
-                )
+                .foregroundStyle(isSelected ? color : ColosseumTheme.tertiaryText)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -28,96 +21,83 @@ struct TagPill: View {
     }
 }
 
-struct TagMatchModeToggle: View {
+/// Plain ∩/∪ glyph matching the column-density icon treatment.
+struct TagMatchModeIcon: View {
     @Binding var mode: TagMatchMode
 
     var body: some View {
-        HStack(spacing: 0) {
-            modeButton(
-                mode: .intersection,
-                symbol: "∩",
-                help: "Intersection (N) — items with every selected tag"
-            )
-            Rectangle()
-                .fill(ColosseumTheme.border)
-                .frame(width: 1, height: 22)
-                .allowsHitTesting(false)
-            modeButton(
-                mode: .union,
-                symbol: "∪",
-                help: "Union (U) — items with any selected tag"
-            )
-        }
-        .overlay(
-            Rectangle()
-                .stroke(ColosseumTheme.border, lineWidth: 1)
-                .allowsHitTesting(false)
-        )
-        // Keep the toggle above the tag scroller’s hit region.
-        .zIndex(1)
-    }
-
-    private func modeButton(mode: TagMatchMode, symbol: String, help: String) -> some View {
-        let selected = self.mode == mode
-        return Button {
-            guard self.mode != mode else { return }
+        Button {
             withAnimation(ColosseumMotion.soft) {
-                self.mode = mode
+                mode = mode == .intersection ? .union : .intersection
             }
         } label: {
-            Text(symbol)
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                .foregroundStyle(selected ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText)
-                .frame(width: 34, height: 28)
-                .background(selected ? ColosseumTheme.elevated : Color.clear)
+            Text(mode == .intersection ? "∩" : "∪")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(ColosseumTheme.tertiaryText)
+                .frame(width: 12, height: 12)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .help(
+            mode == .intersection
+                ? "Intersection — items with every selected tag (N). Click for union."
+                : "Union — items with any selected tag (U). Click for intersection."
+        )
         .pointingHandCursor()
     }
 }
 
-struct TagFilterBar: View {
+/// Centered, horizontally scrollable tag strip for the board header.
+struct TagHeaderScroller: View {
     let tags: [String]
     @Binding var selected: Set<String>
-    @Binding var mode: TagMatchMode
+    @Binding var selectionOrder: [String]
+
+    private var displayedTags: [String] {
+        let natural = tags
+        let naturalKeys = Dictionary(
+            uniqueKeysWithValues: natural.map { (TagParser.normalize($0), $0) }
+        )
+        let selectedFront = selectionOrder.compactMap { naturalKeys[$0] }
+        let unselected = natural.filter { !selected.contains(TagParser.normalize($0)) }
+        return selectedFront + unselected
+    }
 
     var body: some View {
-        if !tags.isEmpty {
-            HStack(spacing: 12) {
-                TagMatchModeToggle(mode: $mode)
-                    .fixedSize()
-
+        Group {
+            if tags.isEmpty {
+                Color.clear.frame(width: 1, height: 1)
+            } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(tags, id: \.self) { tag in
+                    HStack(spacing: 12) {
+                        ForEach(displayedTags, id: \.self) { tag in
                             let key = TagParser.normalize(tag)
                             TagPill(tag: tag, isSelected: selected.contains(key)) {
-                                if selected.contains(key) {
-                                    selected.remove(key)
-                                } else {
-                                    selected.insert(key)
-                                }
+                                toggle(tag)
                             }
                         }
                     }
+                    .padding(.horizontal, 4)
                 }
-
-                if !selected.isEmpty {
-                    Button("Clear") {
-                        selected.removeAll()
-                    }
-                    .font(.system(size: 11))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-                    .pointingHandCursor()
-                }
+                .frame(maxWidth: 520)
+                .frame(height: ChromeMetrics.controlHeight)
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-            .background(ColosseumTheme.canvas)
+        }
+        .animation(ColosseumMotion.soft, value: selectionOrder)
+        .animation(ColosseumMotion.soft, value: selected)
+    }
+
+    private func toggle(_ tag: String) {
+        let key = TagParser.normalize(tag)
+        withAnimation(ColosseumMotion.soft) {
+            if selected.contains(key) {
+                selected.remove(key)
+                selectionOrder.removeAll { $0 == key }
+            } else {
+                selected.insert(key)
+                selectionOrder.removeAll { $0 == key }
+                selectionOrder.insert(key, at: 0)
+            }
         }
     }
 }
