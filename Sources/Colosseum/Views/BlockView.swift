@@ -60,15 +60,7 @@ struct BlockView: View {
         .onAppear {
             focused = true
             reloadPlayer()
-            keyMonitor.onLeft = { step(-1) }
-            keyMonitor.onRight = { step(1) }
-            keyMonitor.onTab = {
-                notesFocusNonce += 1
-                focused = false
-                return true
-            }
-            keyMonitor.onEscape = onClose
-            keyMonitor.install()
+            installKeyMonitor()
         }
         .onDisappear {
             keyMonitor.remove()
@@ -80,25 +72,32 @@ struct BlockView: View {
             showMeta = false
             reloadPlayer()
         }
-        .onExitCommand(perform: onClose)
+        .onChange(of: showConnect) { _, _ in
+            installKeyMonitor()
+        }
+        .onExitCommand(perform: handleEscape)
         .onKeyPress(.escape) {
-            onClose()
+            handleEscape()
             return .handled
         }
         .onKeyPress(.leftArrow) {
+            guard !showConnect else { return .ignored }
             step(-1)
             return .handled
         }
         .onKeyPress(.rightArrow) {
+            guard !showConnect else { return .ignored }
             step(1)
             return .handled
         }
         .onKeyPress(.tab) {
+            guard !showConnect else { return .ignored }
             notesFocusNonce += 1
             focused = false
             return .handled
         }
         .onMoveCommand { direction in
+            guard !showConnect else { return }
             switch direction {
             case .left: step(-1)
             case .right: step(1)
@@ -107,7 +106,7 @@ struct BlockView: View {
         }
         .background {
             HStack {
-                Button("", action: onClose)
+                Button("", action: handleEscape)
                     .keyboardShortcut(.cancelAction)
                 Button("", action: { step(-1) })
                     .keyboardShortcut(.leftArrow, modifiers: [])
@@ -122,6 +121,27 @@ struct BlockView: View {
                 ConnectSheet(block: block, nestedBoard: nil, excludeBoardID: nil)
             }
         }
+    }
+
+    private func installKeyMonitor() {
+        keyMonitor.onLeft = { step(-1) }
+        keyMonitor.onRight = { step(1) }
+        keyMonitor.onTab = {
+            notesFocusNonce += 1
+            focused = false
+            return true
+        }
+        keyMonitor.onEscape = { handleEscape() }
+        keyMonitor.shouldIgnoreNavigation = { showConnect }
+        keyMonitor.install()
+    }
+
+    private func handleEscape() {
+        if showConnect {
+            showConnect = false
+            return
+        }
+        onClose()
     }
 
     @ViewBuilder

@@ -307,7 +307,11 @@ struct ArenaBrowserView: View {
         keyMonitor.onUp = { moveGridFocus(delta: -columnCount) }
         keyMonitor.onDown = { moveGridFocus(delta: columnCount) }
         keyMonitor.onEnter = { activateFocusedItem() }
-        keyMonitor.onEscape = { handleEscape() }
+        keyMonitor.onEscape = {
+            // Item detail (and its Connect sheet) owns Esc while open.
+            if selectedItem != nil { return }
+            handleEscape()
+        }
         keyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         keyMonitor.install()
     }
@@ -595,7 +599,8 @@ private struct ArenaRemoteItemView: View {
 
     @Environment(\.modelContext) private var context
     @State private var loopingPlayer: LoopingVideoPlayer?
-    @State private var isSaving = false
+    @State private var showConnect = false
+    @State private var showMeta = false
     @State private var statusMessage: String?
     @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
@@ -611,39 +616,70 @@ private struct ArenaRemoteItemView: View {
         HStack(spacing: 0) {
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { focused = true }
             Divider().overlay(ColosseumTheme.border)
             sidebar
                 .frame(width: ColosseumTheme.sidebarWidth)
         }
         .background(ColosseumTheme.canvas)
+        .overlay(alignment: .bottomTrailing) {
+            HStack(spacing: 10) {
+                ShortcutHint(text: "←")
+                ShortcutHint(text: "→")
+                ShortcutHint(text: "esc")
+            }
+            .padding(16)
+            .allowsHitTesting(false)
+        }
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
         .onAppear {
             focused = true
             reloadPlayer()
-            keyMonitor.onLeft = { step(-1) }
-            keyMonitor.onRight = { step(1) }
-            keyMonitor.onEscape = onClose
-            keyMonitor.install()
+            installKeyMonitor()
         }
         .onDisappear { keyMonitor.remove() }
         .onChange(of: selected?.id) { _, _ in
             focused = true
+            showMeta = false
             reloadPlayer()
         }
-        .onExitCommand(perform: onClose)
-        .overlay(alignment: .bottom) {
-            HStack(spacing: 10) {
-                ShortcutHint(text: "←")
-                ShortcutHint(text: "→")
-                ShortcutHint(text: "esc")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .padding(.bottom, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: showConnect) { _, _ in
+            installKeyMonitor()
         }
+        .onExitCommand(perform: handleEscape)
+        .onKeyPress(.escape) {
+            handleEscape()
+            return .handled
+        }
+        .sheet(isPresented: $showConnect) {
+            if let item {
+                ConnectSheet(
+                    block: nil,
+                    nestedBoard: nil,
+                    remoteItem: item,
+                    excludeBoardID: nil
+                )
+            }
+        }
+    }
+
+    private func installKeyMonitor() {
+        keyMonitor.onLeft = { step(-1) }
+        keyMonitor.onRight = { step(1) }
+        keyMonitor.onEscape = { handleEscape() }
+        keyMonitor.shouldIgnoreNavigation = { showConnect }
+        keyMonitor.install()
+    }
+
+    private func handleEscape() {
+        if showConnect {
+            showConnect = false
+            return
+        }
+        onClose()
     }
 
     @ViewBuilder
@@ -705,97 +741,150 @@ private struct ArenaRemoteItemView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                Spacer()
-                Button { step(-1) } label: { Image(systemName: "chevron.left") }
-                    .buttonStyle(ChromeIconButtonStyle())
-                    .disabled(items.isEmpty || index <= 0)
-                    .help("Previous")
-                    .pointingHandCursor()
-                Button { step(1) } label: { Image(systemName: "chevron.right") }
-                    .buttonStyle(ChromeIconButtonStyle())
-                    .disabled(items.isEmpty || index >= items.count - 1)
-                    .help("Next")
-                    .pointingHandCursor()
-                Button(action: onClose) { Image(systemName: "xmark") }
-                    .buttonStyle(ChromeIconButtonStyle())
-                    .pointingHandCursor()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-
             if let item {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(item.displayTitle)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(
-                                item.kind == .channel
-                                    ? ColosseumTheme.remoteBoardTitle
-                                    : ColosseumTheme.primaryText
-                            )
-
+                    VStack(alignment: .leading, spacing: 16) {
                         if !item.notes.isEmpty {
                             Text(item.notes)
                                 .font(.system(size: 13))
                                 .foregroundStyle(ColosseumTheme.secondaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text("notes…")
+                                .font(.system(size: 13))
+                                .foregroundStyle(ColosseumTheme.tertiaryText)
                         }
 
-                        metaRow("Type", item.isVideo ? "video" : item.typeName.lowercased())
-                        if item.imageWidth > 0 {
-                            metaRow("Dimensions", "\(item.imageWidth) × \(item.imageHeight)")
-                        }
-                        if item.imageBytes > 0 {
-                            metaRow("Size", ColosseumFormatters.byteCount(item.imageBytes))
-                        } else if item.attachmentBytes > 0 {
-                            metaRow("Size", ColosseumFormatters.byteCount(item.attachmentBytes))
-                        }
-                        if let source = item.sourceURL {
-                            metaRow("Source", source)
+                        if item.kind == .text, !item.textBody.isEmpty {
+                            Text(item.textBody)
+                                .font(.system(size: 13))
+                                .foregroundStyle(ColosseumTheme.primaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .background(ColosseumTheme.surface)
+                                .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 0.5))
                         }
 
-                        Text("Remote preview — not stored locally")
-                            .font(.caption)
-                            .foregroundStyle(ColosseumTheme.tertiaryText)
-                            .padding(.top, 4)
-
-                        HStack(spacing: 8) {
-                            if let destinationBoard {
-                                Button(isSaving ? "Saving…" : "Save to Board") {
-                                    Task { await save(item, to: destinationBoard) }
+                        actionRow(for: item)
+                            .overlay(alignment: .topTrailing) {
+                                if showMeta {
+                                    remoteMetaOverlay(for: item)
+                                        .fixedSize()
+                                        .offset(y: 36)
+                                        .transition(ColosseumMotion.fade)
                                 }
-                                .buttonStyle(ChromeButtonStyle(emphasized: true))
-                                .disabled(isSaving)
-                                .pointingHandCursor()
                             }
-
-                            Menu {
-                                if let urlString = item.previewURL ?? item.sourceURL,
-                                   let url = URL(string: urlString) {
-                                    Button("Open Original") { NSWorkspace.shared.open(url) }
-                                }
-                                if let urlString = item.sourceURL, let url = URL(string: urlString) {
-                                    Button("Open Source URL") { NSWorkspace.shared.open(url) }
-                                }
-                            } label: {
-                                Text("Actions")
-                            }
-                            .buttonStyle(ChromeButtonStyle())
-                            .pointingHandCursor()
-                        }
+                            .zIndex(2)
 
                         if let statusMessage {
                             Text(statusMessage)
                                 .font(.caption)
                                 .foregroundStyle(ColosseumTheme.secondaryText)
                         }
+
+                        Text("Remote preview — not stored locally")
+                            .font(.caption)
+                            .foregroundStyle(ColosseumTheme.tertiaryText)
+                            .padding(.top, 4)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(16)
                     .padding(.bottom, 24)
                 }
             }
             Spacer(minLength: 0)
         }
+        .background(ColosseumTheme.canvas)
+    }
+
+    @ViewBuilder
+    private func actionRow(for item: ArenaContentItem) -> some View {
+        HStack(spacing: 8) {
+            Button("Connect →") { showConnect = true }
+                .buttonStyle(ChromeButtonStyle(emphasized: true))
+                .pointingHandCursor()
+
+            if let source = item.sourceURL ?? item.previewURL, let url = URL(string: source) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "link")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Open Source URL")
+                .pointingHandCursor()
+            }
+
+            if item.kind == .channel,
+               let slug = item.channelSlug {
+                let owner = item.channelOwnerSlug ?? "are.na"
+                if let url = URL(string: "https://www.are.na/\(owner)/\(slug)") {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .buttonStyle(ChromeIconButtonStyle())
+                    .help("Open on Are.na")
+                    .pointingHandCursor()
+                }
+            }
+
+            Button {
+                withAnimation(ColosseumMotion.soft) {
+                    showMeta.toggle()
+                }
+            } label: {
+                Image(systemName: "info.circle")
+            }
+            .buttonStyle(ChromeIconButtonStyle(active: showMeta))
+            .help("Metadata")
+            .pointingHandCursor()
+            .onHover { hovering in
+                withAnimation(ColosseumMotion.soft) {
+                    showMeta = hovering
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func remoteMetaOverlay(for item: ArenaContentItem) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(item.displayTitle)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(
+                    item.kind == .channel
+                        ? ColosseumTheme.remoteBoardTitle
+                        : ColosseumTheme.primaryText
+                )
+
+            VStack(spacing: 0) {
+                metaRow("Content Type", item.isVideo ? "video" : item.typeName.lowercased())
+                if item.imageWidth > 0, item.imageHeight > 0 {
+                    metaRow("Dimensions", "\(item.imageWidth) × \(item.imageHeight)")
+                }
+                if item.imageBytes > 0 {
+                    metaRow("File Size", ColosseumFormatters.byteCount(item.imageBytes))
+                } else if item.attachmentBytes > 0 {
+                    metaRow("File Size", ColosseumFormatters.byteCount(item.attachmentBytes))
+                }
+                if item.kind == .channel {
+                    metaRow("Blocks", "\(item.channelBlockCount)")
+                    if let owner = item.channelOwnerName {
+                        metaRow("By", owner)
+                    }
+                }
+                if let source = item.sourceURL, !source.isEmpty {
+                    metaRow("Source", source)
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 260, alignment: .leading)
+        .background(ColosseumTheme.elevated)
+        .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 12, y: 4)
+        .allowsHitTesting(true)
     }
 
     private func metaRow(_ label: String, _ value: String) -> some View {
@@ -839,7 +928,7 @@ private struct ArenaRemoteItemView: View {
     }
 
     private func step(_ delta: Int) {
-        guard !items.isEmpty else { return }
+        guard !showConnect, !items.isEmpty else { return }
         let next = index + delta
         guard next >= 0, next < items.count else { return }
         selected = items[next]
@@ -855,16 +944,5 @@ private struct ArenaRemoteItemView: View {
         let next = VideoPlayback.looping(url: url, muted: false)
         loopingPlayer = next
         next.play()
-    }
-
-    private func save(_ item: ArenaContentItem, to board: Board) async {
-        isSaving = true
-        defer { isSaving = false }
-        do {
-            try await ArenaImportService.saveItem(item, into: board, context: context)
-            statusMessage = "Saved to \(board.title)"
-        } catch {
-            statusMessage = error.localizedDescription
-        }
     }
 }

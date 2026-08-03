@@ -337,6 +337,9 @@ struct BoardOverviewView: View {
             } else if arenaBrowseTarget != nil {
                 // ArenaBrowserView owns Esc while remote is open.
                 return
+            } else if selectedConnectionID != nil {
+                // BlockView owns Esc (including Connect sheet).
+                return
             } else {
                 handleEscape()
             }
@@ -751,16 +754,8 @@ struct BoardOverviewView: View {
     }
 
     private func handleEscape() {
-        if selectedConnectionID != nil {
-            withAnimation(ColosseumMotion.overlay) {
-                selectedConnectionID = nil
-            }
-            return
-        }
-        if arenaBrowseTarget != nil {
-            // Nested remote Esc is handled inside ArenaBrowserView.
-            return
-        }
+        // Block preview / Arena browser own Esc (including nested Connect sheets).
+        if selectedConnectionID != nil || arenaBrowseTarget != nil { return }
         withAnimation(ColosseumMotion.overlay) {
             if path.count > 1 {
                 _ = path.popLast()
