@@ -49,6 +49,31 @@ enum TagParser {
         return trimmed
     }
 
+    /// Appends `#tag` to notes if not already present. Idempotent by normalized key.
+    static func appendingTag(_ tag: String, to notes: String) -> String {
+        let key = normalize(tag)
+        guard !key.isEmpty else { return notes }
+        let existing = Set(tags(in: notes).map(normalize))
+        guard !existing.contains(key) else { return notes }
+        let token = displayLabel(tag)
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? token : trimmed + " " + token
+    }
+
+    /// Header order: currently selected tags (by selection order), then the rest alphabetically.
+    static func displayedTags(
+        _ tags: [String],
+        selected: Set<String>,
+        selectionOrder: [String]
+    ) -> [String] {
+        let naturalKeys = Dictionary(
+            uniqueKeysWithValues: tags.map { (normalize($0), $0) }
+        )
+        let selectedFront = selectionOrder.compactMap { naturalKeys[$0] }
+        let unselected = tags.filter { !selected.contains(normalize($0)) }
+        return selectedFront + unselected
+    }
+
     /// Collect unique tags from board connections (block notes + nested board notes).
     static func boardTags(from board: Board) -> [String] {
         var seen = Set<String>()

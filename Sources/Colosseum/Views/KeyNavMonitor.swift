@@ -8,8 +8,11 @@ final class KeyNavMonitor {
     var onUp: (() -> Void)?
     var onDown: (() -> Void)?
     var onEnter: (() -> Void)?
-    var onTab: (() -> Void)?
+    /// Return true to consume Tab.
+    var onTab: (() -> Bool)?
     var onEscape: (() -> Void)?
+    /// Unmodified character keys (lowercase). Return true to consume the event.
+    var onCharacter: ((String) -> Bool)?
     /// When true, arrow / enter keys are left alone (e.g. text caret movement).
     var shouldIgnoreNavigation: (() -> Bool)?
 
@@ -63,8 +66,7 @@ final class KeyNavMonitor {
                 return event
             case 48: // tab
                 if event.modifierFlags.contains(.shift) { return event }
-                if let onTab = self.onTab {
-                    DispatchQueue.main.async { onTab() }
+                if let onTab = self.onTab, onTab() {
                     return nil
                 }
                 return event
@@ -72,6 +74,14 @@ final class KeyNavMonitor {
                 DispatchQueue.main.async { self.onEscape?() }
                 return nil
             default:
+                let mods = event.modifierFlags.intersection([.command, .option, .control])
+                if mods.isEmpty,
+                   let chars = event.charactersIgnoringModifiers?.lowercased(),
+                   chars.count == 1,
+                   let onCharacter = self.onCharacter,
+                   onCharacter(chars) {
+                    return nil
+                }
                 return event
             }
         }

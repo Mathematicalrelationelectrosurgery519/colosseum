@@ -65,6 +65,7 @@ struct BlockView: View {
             keyMonitor.onTab = {
                 notesFocusNonce += 1
                 focused = false
+                return true
             }
             keyMonitor.onEscape = onClose
             keyMonitor.install()

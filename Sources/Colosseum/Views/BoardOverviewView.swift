@@ -29,9 +29,28 @@ struct BoardOverviewView: View {
     @State private var gridFocusID: UUID?
     @State private var boardKeyMonitor = KeyNavMonitor()
     @FocusState private var boardFocused: Bool
+    /// Keyboard tag-assign sequence (T → Tab → arrows → Enter; Esc cancels).
+    @State private var isAssigningTag = false
+    /// Index into `assignableTags` while cycling; nil until Tab focuses the first tag.
+    @State private var tagAssignFocusIndex: Int?
 
     private var isBrowsingGrid: Bool {
         selectedConnectionID == nil && arenaBrowseTarget == nil
+    }
+
+    private var assignableTags: [String] {
+        TagParser.displayedTags(
+            availableTags,
+            selected: selectedTags,
+            selectionOrder: tagSelectionOrder
+        )
+    }
+
+    private var focusedAssignTagKey: String? {
+        guard isAssigningTag, let tagAssignFocusIndex,
+              assignableTags.indices.contains(tagAssignFocusIndex)
+        else { return nil }
+        return TagParser.normalize(assignableTags[tagAssignFocusIndex])
     }
 
     private var shouldSuppressGridClicks: Bool {
@@ -96,7 +115,8 @@ struct BoardOverviewView: View {
                         TagHeaderScroller(
                             tags: availableTags,
                             selected: $selectedTags,
-                            selectionOrder: $tagSelectionOrder
+                            selectionOrder: $tagSelectionOrder,
+                            focusedTagKey: focusedAssignTagKey
                         )
                         .opacity(isBrowsingGrid ? 1 : 0)
                         .allowsHitTesting(isBrowsingGrid)
@@ -140,6 +160,7 @@ struct BoardOverviewView: View {
                 if browsing {
                     activateBoardFocus()
                 } else {
+                    endTagAssign()
                     boardKeyMonitor.remove()
                 }
             }
@@ -152,6 +173,13 @@ struct BoardOverviewView: View {
                 let keys = Set(tags.map { TagParser.normalize($0) })
                 selectedTags = selectedTags.intersection(keys)
                 tagSelectionOrder = tagSelectionOrder.filter { keys.contains($0) }
+                if isAssigningTag {
+                    if tags.isEmpty {
+                        endTagAssign()
+                    } else if let idx = tagAssignFocusIndex {
+                        tagAssignFocusIndex = min(idx, max(0, assignableTags.count - 1))
+                    }
+                }
             }
             .onExitCommand(perform: handleEscape)
             .sheet(isPresented: $showAddSheet) {
@@ -231,14 +259,136 @@ struct BoardOverviewView: View {
     }
 
     private func installBoardKeyMonitor() {
-        boardKeyMonitor.onLeft = { moveGridFocus(delta: -1) }
-        boardKeyMonitor.onRight = { moveGridFocus(delta: 1) }
-        boardKeyMonitor.onUp = { moveGridFocus(delta: -columnCount) }
-        boardKeyMonitor.onDown = { moveGridFocus(delta: columnCount) }
-        boardKeyMonitor.onEnter = { activateFocusedConnection() }
-        boardKeyMonitor.onEscape = { handleEscape() }
+        boardKeyMonitor.onLeft = {
+            if isAssigningTag {
+                moveTagAssignFocus(delta: -1)
+            } else {
+                moveGridFocus(delta: -1)
+            }
+        }
+        boardKeyMonitor.onRight = {
+            if isAssigningTag {
+                moveTagAssignFocus(delta: 1)
+            } else {
+                moveGridFocus(delta: 1)
+            }
+        }
+        boardKeyMonitor.onUp = {
+            if isAssigningTag {
+                moveTagAssignFocus(delta: -1)
+            } else {
+                moveGridFocus(delta: -columnCount)
+            }
+        }
+        boardKeyMonitor.onDown = {
+            if isAssigningTag {
+                moveTagAssignFocus(delta: 1)
+            } else {
+                moveGridFocus(delta: columnCount)
+            }
+        }
+        boardKeyMonitor.onEnter = {
+            if isAssigningTag {
+                assignFocusedTag()
+            } else {
+                activateFocusedConnection()
+            }
+        }
+        boardKeyMonitor.onTab = {
+            guard isAssigningTag else { return false }
+            DispatchQueue.main.async { focusFirstAssignTagOrAdvance() }
+            return true
+        }
+        boardKeyMonitor.onEscape = {
+            if isAssigningTag {
+                endTagAssign()
+            } else {
+                handleEscape()
+            }
+        }
+        boardKeyMonitor.onCharacter = { char in
+            guard isBrowsingGrid else { return false }
+            if char == "t" {
+                DispatchQueue.main.async { toggleTagAssign() }
+                return true
+            }
+            return false
+        }
         boardKeyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         boardKeyMonitor.install()
+    }
+
+    private func toggleTagAssign() {
+        if isAssigningTag {
+            endTagAssign()
+            return
+        }
+        beginTagAssign()
+    }
+
+    private func beginTagAssign() {
+        guard isBrowsingGrid, !availableTags.isEmpty else { return }
+        if gridFocusID == nil {
+            gridFocusID = filteredConnections.first?.id
+        }
+        guard gridFocusID != nil else { return }
+        boardFocused = true
+        isAssigningTag = true
+        tagAssignFocusIndex = nil
+    }
+
+    private func endTagAssign() {
+        isAssigningTag = false
+        tagAssignFocusIndex = nil
+    }
+
+    private func focusFirstAssignTagOrAdvance() {
+        guard isAssigningTag, !assignableTags.isEmpty else { return }
+        if tagAssignFocusIndex == nil {
+            withAnimation(ColosseumMotion.soft) {
+                tagAssignFocusIndex = 0
+            }
+        } else {
+            moveTagAssignFocus(delta: 1)
+        }
+    }
+
+    private func moveTagAssignFocus(delta: Int) {
+        guard isAssigningTag else { return }
+        let tags = assignableTags
+        guard !tags.isEmpty else { return }
+        // Arrows only cycle once Tab has focused the first tag.
+        guard let idx = tagAssignFocusIndex else { return }
+        let count = tags.count
+        let next = ((idx + delta) % count + count) % count
+        withAnimation(ColosseumMotion.soft) {
+            tagAssignFocusIndex = next
+        }
+    }
+
+    private func assignFocusedTag() {
+        guard isAssigningTag,
+              let idx = tagAssignFocusIndex,
+              assignableTags.indices.contains(idx),
+              let connectionID = gridFocusID,
+              let connection = connections.first(where: { $0.id == connectionID })
+        else { return }
+
+        let tag = assignableTags[idx]
+        if let block = connection.block {
+            let next = TagParser.appendingTag(tag, to: block.notes)
+            guard next != block.notes else { return }
+            block.notes = next
+            board.updatedAt = .now
+            try? context.save()
+        } else if let nested = connection.nestedBoard {
+            let next = TagParser.appendingTag(tag, to: nested.notes)
+            guard next != nested.notes else { return }
+            nested.notes = next
+            nested.updatedAt = .now
+            board.updatedAt = .now
+            try? context.save()
+        }
     }
 
     private func moveGridFocus(delta: Int) {

@@ -4,6 +4,7 @@ import SwiftUI
 struct TagPill: View {
     let tag: String
     var isSelected: Bool
+    var isFocused: Bool = false
     var action: () -> Void
 
     private var color: Color { TagColor.color(for: tag) }
@@ -12,12 +13,21 @@ struct TagPill: View {
         Button(action: action) {
             Text(TagParser.displayLabel(tag))
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isSelected ? color : ColosseumTheme.tertiaryText)
+                .foregroundStyle(isSelected || isFocused ? color : ColosseumTheme.tertiaryText)
+                .overlay(alignment: .bottom) {
+                    if isFocused {
+                        Rectangle()
+                            .fill(color)
+                            .frame(height: 1)
+                            .offset(y: 3)
+                    }
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .pointingHandCursor()
         .animation(ColosseumMotion.soft, value: isSelected)
+        .animation(ColosseumMotion.soft, value: isFocused)
     }
 }
 
@@ -52,15 +62,11 @@ struct TagHeaderScroller: View {
     let tags: [String]
     @Binding var selected: Set<String>
     @Binding var selectionOrder: [String]
+    /// Normalized tag key currently focused for keyboard assign (nil = none).
+    var focusedTagKey: String? = nil
 
     private var displayedTags: [String] {
-        let natural = tags
-        let naturalKeys = Dictionary(
-            uniqueKeysWithValues: natural.map { (TagParser.normalize($0), $0) }
-        )
-        let selectedFront = selectionOrder.compactMap { naturalKeys[$0] }
-        let unselected = natural.filter { !selected.contains(TagParser.normalize($0)) }
-        return selectedFront + unselected
+        TagParser.displayedTags(tags, selected: selected, selectionOrder: selectionOrder)
     }
 
     var body: some View {
@@ -68,23 +74,37 @@ struct TagHeaderScroller: View {
             if tags.isEmpty {
                 Color.clear.frame(width: 1, height: 1)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(displayedTags, id: \.self) { tag in
-                            let key = TagParser.normalize(tag)
-                            TagPill(tag: tag, isSelected: selected.contains(key)) {
-                                toggle(tag)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(displayedTags, id: \.self) { tag in
+                                let key = TagParser.normalize(tag)
+                                TagPill(
+                                    tag: tag,
+                                    isSelected: selected.contains(key),
+                                    isFocused: focusedTagKey == key
+                                ) {
+                                    toggle(tag)
+                                }
+                                .id(key)
                             }
                         }
+                        .padding(.horizontal, 4)
                     }
-                    .padding(.horizontal, 4)
+                    .frame(maxWidth: 520)
+                    .frame(height: ChromeMetrics.controlHeight)
+                    .onChange(of: focusedTagKey) { _, key in
+                        guard let key else { return }
+                        withAnimation(ColosseumMotion.soft) {
+                            proxy.scrollTo(key, anchor: .center)
+                        }
+                    }
                 }
-                .frame(maxWidth: 520)
-                .frame(height: ChromeMetrics.controlHeight)
             }
         }
         .animation(ColosseumMotion.soft, value: selectionOrder)
         .animation(ColosseumMotion.soft, value: selected)
+        .animation(ColosseumMotion.soft, value: focusedTagKey)
     }
 
     private func toggle(_ tag: String) {
