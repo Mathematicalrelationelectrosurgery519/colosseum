@@ -5,12 +5,13 @@ enum ChromeMetrics {
     static let controlHeight: CGFloat = 30
     static let iconButtonWidth: CGFloat = 30
     static let homeIconSize: CGFloat = 22
-    static let columnSliderWidth: CGFloat = 168
     static let boardColumnsMin = 2
     static let boardColumnsMax = 8
     static let boardColumnsDefault = 4
     /// Magnification delta required to move one column step (higher = less sensitive).
     static let pinchStepThreshold: CGFloat = 0.22
+    /// Match board grid content inset so trailing toolbar controls line up.
+    static let contentInset: CGFloat = 28
 }
 
 /// Bordered chrome control matching the home Import button look.
@@ -168,10 +169,6 @@ struct ColumnDensityControl: View {
                 .foregroundStyle(ColosseumTheme.tertiaryText)
                 .frame(width: 12, alignment: .trailing)
         }
-        .padding(.horizontal, 10)
-        .frame(width: ChromeMetrics.columnSliderWidth, height: ChromeMetrics.controlHeight)
-        .background(ColosseumTheme.surface)
-        .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
         .help("Items per column")
     }
 }
@@ -191,6 +188,8 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
                     .opacity(visible ? 1 : 0)
                     .allowsHitTesting(visible)
             }
+            // System toolbar already insets a bit; pad the rest to match grid content (28).
+            .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }
         .colosseumPlainToolbarItem()
     }
