@@ -81,11 +81,7 @@ struct BoardOverviewView: View {
             .toolbar {
                 ColosseumBoardHeaderToolbar(
                     title: board.title,
-                    onHome: {
-                        withAnimation(ColosseumMotion.overlay) { path = [] }
-                    },
-                    onTitleTap: navigateBackViaTitle,
-                    showShortcutHints: true
+                    onTitleTap: navigateBackViaTitle
                 )
                 ColosseumColumnSliderToolbar(
                     columnCount: $columnCount,
@@ -165,7 +161,7 @@ struct BoardOverviewView: View {
     private var boardKeyEquivalents: some View {
         Group {
             Button("") { showAddSheet = true }
-                .keyboardShortcut(.return, modifiers: .command)
+                .keyboardShortcut("n", modifiers: .command)
             Button("") {
                 renameTitle = board.title
                 showRename = true

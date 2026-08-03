@@ -42,13 +42,7 @@ struct BoardLibraryView: View {
         .toolbarColorScheme(.dark, for: .windowToolbar)
         .toolbar {
             if showsToolbar {
-                // Same leading slot as board view so the mark doesn't jump.
-                ColosseumBoardHeaderToolbar()
-                ColosseumHomeActionsToolbar(
-                    onSearch: onSearch,
-                    onImport: onImportArena,
-                    onCreate: onCreate
-                )
+                ColosseumHomeShortcutHintsToolbar()
             }
         }
     }
@@ -58,23 +52,10 @@ struct BoardLibraryView: View {
             Text("No boards yet")
                 .font(.title3)
                 .foregroundStyle(ColosseumTheme.primaryText)
-            Text("Create a board, or import a public Are.na channel.")
+            Text("Create a board with ⌘↩, or import with ⌘I.")
                 .font(.callout)
                 .foregroundStyle(ColosseumTheme.secondaryText)
                 .multilineTextAlignment(.center)
-            HStack(spacing: 12) {
-                Button(action: onImportArena) {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(ChromeButtonStyle())
-                .pointingHandCursor()
-                Button(action: onCreate) {
-                    Label("New Board", systemImage: "plus")
-                }
-                .buttonStyle(ChromeButtonStyle(emphasized: true))
-                .pointingHandCursor()
-            }
-            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 80)

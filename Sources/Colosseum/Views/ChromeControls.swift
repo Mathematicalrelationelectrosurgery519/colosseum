@@ -51,6 +51,7 @@ struct ShortcutHint: View {
         Text(text)
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(ColosseumTheme.tertiaryText)
+            .contentShape(Rectangle())
     }
 }
 
@@ -98,84 +99,48 @@ struct WindowChromeStabilizer: NSViewRepresentable {
     }
 }
 
-struct ColosseumHomeActionsToolbar: ToolbarContent {
-    var onSearch: () -> Void
-    var onImport: () -> Void
-    var onCreate: () -> Void
-
+struct ColosseumHomeShortcutHintsToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            HStack(alignment: .center, spacing: 8) {
-                Button(action: onSearch) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                        Text("Search")
-                    }
-                }
-                .buttonStyle(ChromeButtonStyle())
-                .help("Search boards (⌘K)")
-                .pointingHandCursor()
-
-                Button(action: onImport) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.down")
-                        Text("Import")
-                    }
-                }
-                .buttonStyle(ChromeButtonStyle())
-                .pointingHandCursor()
-
-                Button(action: onCreate) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                        Text("New Board")
-                    }
-                }
-                .buttonStyle(ChromeButtonStyle(emphasized: true))
-                .pointingHandCursor()
+            HStack(alignment: .center, spacing: 14) {
+                ShortcutHint(text: "⌘K")
+                    .help("Search boards")
+                ShortcutHint(text: "⌘I")
+                    .help("Import")
+                ShortcutHint(text: "⌘↩")
+                    .help("New Board")
             }
-            .frame(height: ChromeMetrics.controlHeight)
-            .fixedSize(horizontal: true, vertical: false)
+            .frame(height: ChromeMetrics.controlHeight, alignment: .center)
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }
         .colosseumPlainToolbarItem()
     }
 }
 
-/// Shared leading header chrome — icon sits in the same slot on home and board.
+/// Board-only leading chrome (title + hints). App icon lives on RootView so it never shifts.
 struct ColosseumBoardHeaderToolbar: ToolbarContent {
-    var title: String? = nil
-    var onHome: (() -> Void)? = nil
-    var onTitleTap: (() -> Void)? = nil
-    var showShortcutHints = false
+    let title: String
+    var onTitleTap: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             HStack(alignment: .center, spacing: 0) {
-                AppHomeButton {
-                    onHome?()
-                }
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .lineLimit(1)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onTitleTap)
+                    .pointingHandCursor()
+                    .help("Back to board overview")
 
-                if let title {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(ColosseumTheme.primaryText)
-                        .lineLimit(1)
-                        .padding(.leading, 10)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onTitleTap?() }
-                        .pointingHandCursor()
-                        .help("Back to board overview")
+                HStack(spacing: 10) {
+                    ShortcutHint(text: "⌘N")
+                        .help("Add to board")
+                    ShortcutHint(text: "⌘R")
+                        .help("Rename board")
                 }
-
-                if showShortcutHints {
-                    HStack(spacing: 10) {
-                        ShortcutHint(text: "⌘↩")
-                        ShortcutHint(text: "⌘R")
-                    }
-                    .padding(.leading, 14)
-                    .allowsHitTesting(false)
-                }
+                .padding(.leading, 14)
             }
             .frame(height: ChromeMetrics.controlHeight, alignment: .center)
         }

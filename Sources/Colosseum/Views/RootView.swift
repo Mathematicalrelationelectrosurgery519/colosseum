@@ -46,6 +46,19 @@ struct RootView: View {
                 .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
                 .toolbarBackground(.visible, for: .windowToolbar)
                 .toolbarColorScheme(.dark, for: .windowToolbar)
+                // Stable leading slot — same item on home and board so the mark never shifts.
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        AppHomeButton {
+                            guard !path.isEmpty else { return }
+                            withAnimation(ColosseumMotion.overlay) {
+                                path = []
+                            }
+                        }
+                        .frame(height: ChromeMetrics.controlHeight)
+                    }
+                    .colosseumPlainToolbarItem()
+                }
             }
             .modifier(WindowContainerBackground())
 

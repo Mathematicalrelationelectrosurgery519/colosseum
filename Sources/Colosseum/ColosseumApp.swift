@@ -35,12 +35,12 @@ struct ColosseumApp: App {
                 Button("New Board") {
                     NotificationCenter.default.post(name: .colosseumNewBoard, object: nil)
                 }
-                .keyboardShortcut("n", modifiers: .command)
+                .keyboardShortcut(.return, modifiers: .command)
 
                 Button("Add to Board…") {
                     NotificationCenter.default.post(name: .colosseumAdd, object: nil)
                 }
-                .keyboardShortcut(.return, modifiers: .command)
+                .keyboardShortcut("n", modifiers: .command)
 
                 Button("Rename Board…") {
                     NotificationCenter.default.post(name: .colosseumRename, object: nil)
@@ -79,7 +79,7 @@ struct ColosseumApp: App {
                 Button("Import…") {
                     NotificationCenter.default.post(name: .colosseumImportArena, object: nil)
                 }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .keyboardShortcut("i", modifiers: .command)
             }
 
             CommandGroup(after: .sidebar) {
