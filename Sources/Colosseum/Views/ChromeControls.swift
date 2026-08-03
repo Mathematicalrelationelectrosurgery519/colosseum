@@ -98,27 +98,14 @@ struct WindowChromeStabilizer: NSViewRepresentable {
     }
 }
 
-struct ColosseumLeadingToolbar: ToolbarContent {
-    var onHome: (() -> Void)?
-
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            AppHomeButton {
-                onHome?()
-            }
-        }
-        .colosseumPlainToolbarItem()
-    }
-}
-
 struct ColosseumHomeActionsToolbar: ToolbarContent {
     var onSearch: () -> Void
     var onImport: () -> Void
     var onCreate: () -> Void
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .confirmationAction) {
-            HStack(spacing: 8) {
+        ToolbarItem(placement: .primaryAction) {
+            HStack(alignment: .center, spacing: 8) {
                 Button(action: onSearch) {
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass")
@@ -147,40 +134,50 @@ struct ColosseumHomeActionsToolbar: ToolbarContent {
                 .buttonStyle(ChromeButtonStyle(emphasized: true))
                 .pointingHandCursor()
             }
-            .fixedSize()
+            .frame(height: ChromeMetrics.controlHeight)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }
         .colosseumPlainToolbarItem()
     }
 }
 
+/// Shared leading header chrome — icon sits in the same slot on home and board.
 struct ColosseumBoardHeaderToolbar: ToolbarContent {
-    let title: String
-    var onHome: () -> Void
-    var onTitleTap: () -> Void
+    var title: String? = nil
+    var onHome: (() -> Void)? = nil
+    var onTitleTap: (() -> Void)? = nil
+    var showShortcutHints = false
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            HStack(spacing: 0) {
-                AppHomeButton(action: onHome)
-
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ColosseumTheme.primaryText)
-                    .lineLimit(1)
-                    .padding(.leading, 10)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onTitleTap)
-                    .pointingHandCursor()
-                    .help("Back to board overview")
-
-                HStack(spacing: 10) {
-                    ShortcutHint(text: "⌘↩")
-                    ShortcutHint(text: "⌘R")
+            HStack(alignment: .center, spacing: 0) {
+                AppHomeButton {
+                    onHome?()
                 }
-                .padding(.leading, 14)
-                .allowsHitTesting(false)
+
+                if let title {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(ColosseumTheme.primaryText)
+                        .lineLimit(1)
+                        .padding(.leading, 10)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onTitleTap?() }
+                        .pointingHandCursor()
+                        .help("Back to board overview")
+                }
+
+                if showShortcutHints {
+                    HStack(spacing: 10) {
+                        ShortcutHint(text: "⌘↩")
+                        ShortcutHint(text: "⌘R")
+                    }
+                    .padding(.leading, 14)
+                    .allowsHitTesting(false)
+                }
             }
+            .frame(height: ChromeMetrics.controlHeight, alignment: .center)
         }
         .colosseumPlainToolbarItem()
     }
@@ -257,6 +254,7 @@ struct AppHomeButton: View {
                 }
             }
             .frame(width: ChromeMetrics.homeIconSize, height: ChromeMetrics.homeIconSize)
+            .frame(height: ChromeMetrics.controlHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

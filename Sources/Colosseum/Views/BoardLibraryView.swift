@@ -42,7 +42,8 @@ struct BoardLibraryView: View {
         .toolbarColorScheme(.dark, for: .windowToolbar)
         .toolbar {
             if showsToolbar {
-                ColosseumLeadingToolbar(onHome: nil)
+                // Same leading slot as board view so the mark doesn't jump.
+                ColosseumBoardHeaderToolbar()
                 ColosseumHomeActionsToolbar(
                     onSearch: onSearch,
                     onImport: onImportArena,

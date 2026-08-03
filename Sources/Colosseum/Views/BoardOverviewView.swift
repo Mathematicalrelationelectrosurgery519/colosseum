@@ -84,7 +84,8 @@ struct BoardOverviewView: View {
                     onHome: {
                         withAnimation(ColosseumMotion.overlay) { path = [] }
                     },
-                    onTitleTap: navigateBackViaTitle
+                    onTitleTap: navigateBackViaTitle,
+                    showShortcutHints: true
                 )
                 ColosseumColumnSliderToolbar(
                     columnCount: $columnCount,
@@ -98,6 +99,16 @@ struct BoardOverviewView: View {
             .onExitCommand(perform: handleEscape)
             .onKeyPress(.escape) {
                 handleEscape()
+                return .handled
+            }
+            .onKeyPress(KeyEquivalent("n"), phases: .down) { press in
+                guard press.modifiers.isEmpty, isBrowsingGrid else { return .ignored }
+                setTagMatchMode(.intersection)
+                return .handled
+            }
+            .onKeyPress(KeyEquivalent("u"), phases: .down) { press in
+                guard press.modifiers.isEmpty, isBrowsingGrid else { return .ignored }
+                setTagMatchMode(.union)
                 return .handled
             }
             .sheet(isPresented: $showAddSheet) {
@@ -160,9 +171,20 @@ struct BoardOverviewView: View {
                 showRename = true
             }
             .keyboardShortcut("r", modifiers: .command)
+            Button("") { setTagMatchMode(.intersection) }
+                .keyboardShortcut("n", modifiers: [])
+            Button("") { setTagMatchMode(.union) }
+                .keyboardShortcut("u", modifiers: [])
         }
         .opacity(0)
         .allowsHitTesting(false)
+    }
+
+    private func setTagMatchMode(_ mode: TagMatchMode) {
+        guard isBrowsingGrid, tagMatchMode != mode else { return }
+        withAnimation(ColosseumMotion.soft) {
+            tagMatchMode = mode
+        }
     }
 
     private var boardStack: some View {

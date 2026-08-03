@@ -36,7 +36,7 @@ struct TagMatchModeToggle: View {
             modeButton(
                 mode: .intersection,
                 symbol: "∩",
-                help: "Intersection — items with every selected tag"
+                help: "Intersection (N) — items with every selected tag"
             )
             Rectangle()
                 .fill(ColosseumTheme.border)
@@ -45,7 +45,7 @@ struct TagMatchModeToggle: View {
             modeButton(
                 mode: .union,
                 symbol: "∪",
-                help: "Union — items with any selected tag"
+                help: "Union (U) — items with any selected tag"
             )
         }
         .overlay(
