@@ -333,37 +333,45 @@ struct BoardOverviewView: View {
     }
 
     private var boardGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                Button {
-                    guard !shouldSuppressGridClicks else { return }
-                    showAddSheet = true
-                } label: {
-                    AddBlockCell()
-                }
-                .buttonStyle(.plain)
-                .pointingHandCursor()
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                    Button {
+                        guard !shouldSuppressGridClicks else { return }
+                        showAddSheet = true
+                    } label: {
+                        AddBlockCell()
+                    }
+                    .buttonStyle(.plain)
+                    .pointingHandCursor()
 
-                ForEach(filteredConnections, id: \.id) { connection in
-                    connectionCell(connection)
-                        .overlay {
-                            if connection.id == gridFocusID, isBrowsingGrid {
-                                Rectangle()
-                                    .stroke(Color.white.opacity(0.85), lineWidth: 2)
-                                    .padding(.bottom, 22)
-                                    .allowsHitTesting(false)
+                    ForEach(filteredConnections, id: \.id) { connection in
+                        connectionCell(connection)
+                            .id(connection.id)
+                            .overlay {
+                                if connection.id == gridFocusID, isBrowsingGrid {
+                                    Rectangle()
+                                        .stroke(Color.white.opacity(0.85), lineWidth: 2)
+                                        .allowsHitTesting(false)
+                                }
                             }
-                        }
-                        .pointingHandCursor()
-                        .transition(ColosseumMotion.itemTransition)
+                            .pointingHandCursor()
+                            .transition(ColosseumMotion.itemTransition)
+                    }
+                }
+                .padding(28)
+                .animation(ColosseumMotion.standard, value: selectedTags)
+                .animation(ColosseumMotion.standard, value: tagMatchMode)
+                .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
+                .animation(ColosseumMotion.standard, value: columnCount)
+                .allowsHitTesting(!isPinching)
+            }
+            .onChange(of: gridFocusID) { _, id in
+                guard let id, isBrowsingGrid else { return }
+                withAnimation(ColosseumMotion.soft) {
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
-            .padding(28)
-            .animation(ColosseumMotion.standard, value: selectedTags)
-            .animation(ColosseumMotion.standard, value: tagMatchMode)
-            .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
-            .animation(ColosseumMotion.standard, value: columnCount)
-            .allowsHitTesting(!isPinching)
         }
         .highPriorityGesture(columnPinchGesture)
     }

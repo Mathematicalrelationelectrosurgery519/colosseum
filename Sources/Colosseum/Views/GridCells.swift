@@ -4,31 +4,25 @@ import SwiftUI
 
 struct AddBlockCell: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Rectangle()
-                    .fill(ColosseumTheme.surface)
-                Image(systemName: "plus")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(ColosseumTheme.primaryText)
-                VStack {
+        ZStack {
+            Rectangle()
+                .fill(ColosseumTheme.surface)
+            Image(systemName: "plus")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(ColosseumTheme.primaryText)
+            VStack {
+                Spacer()
+                HStack {
+                    Text("⌘↩")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(ColosseumTheme.tertiaryText)
+                        .padding(8)
                     Spacer()
-                    HStack {
-                        Text("⌘↩")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(ColosseumTheme.tertiaryText)
-                            .padding(8)
-                        Spacer()
-                    }
                 }
             }
-            .aspectRatio(1, contentMode: .fit)
-            .blockTagBorder(tags: [], lineWidth: 1)
-
-            Text("Add")
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .blockTagBorder(tags: [], lineWidth: 1)
     }
 }
 
@@ -41,55 +35,48 @@ struct MediaBlockCell: View {
     private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .bottomTrailing) {
-                Group {
-                    if block.kind == .video, isHovering, let hoverPlayer {
-                        PlayerView(
-                            player: hoverPlayer.player,
-                            showsControls: false,
-                            videoGravity: .resizeAspect
-                        )
-                        .allowsHitTesting(false)
-                        .transition(ColosseumMotion.fade)
-                    } else {
-                        thumbnail
-                            .transition(ColosseumMotion.fade)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .aspectRatio(1, contentMode: .fit)
-                .clipped()
-                .background(ColosseumTheme.surface)
-                .animation(ColosseumMotion.soft, value: isHovering)
-
-                if block.kind == .video, !isHovering {
-                    Image(systemName: "play.rectangle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(8)
-                        .transition(ColosseumMotion.fade)
-                }
-            }
-            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : 1.5)
-            .onHover { hovering in
-                guard block.kind == .video else { return }
-                withAnimation(ColosseumMotion.soft) {
-                    isHovering = hovering
-                }
-                if hovering {
-                    startHoverPlayback()
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if block.kind == .video, isHovering, let hoverPlayer {
+                    PlayerView(
+                        player: hoverPlayer.player,
+                        showsControls: false,
+                        videoGravity: .resizeAspect
+                    )
+                    .allowsHitTesting(false)
+                    .transition(ColosseumMotion.fade)
                 } else {
-                    stopHoverPlayback()
+                    thumbnail
+                        .transition(ColosseumMotion.fade)
                 }
             }
-            .onDisappear { stopHoverPlayback() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .aspectRatio(1, contentMode: .fit)
+            .clipped()
+            .background(ColosseumTheme.surface)
+            .animation(ColosseumMotion.soft, value: isHovering)
 
-            Text(block.displayTitle)
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
-                .lineLimit(1)
+            if block.kind == .video, !isHovering {
+                Image(systemName: "play.rectangle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(8)
+                    .transition(ColosseumMotion.fade)
+            }
         }
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : 1.5)
+        .onHover { hovering in
+            guard block.kind == .video else { return }
+            withAnimation(ColosseumMotion.soft) {
+                isHovering = hovering
+            }
+            if hovering {
+                startHoverPlayback()
+            } else {
+                stopHoverPlayback()
+            }
+        }
+        .onDisappear { stopHoverPlayback() }
     }
 
     @ViewBuilder
@@ -137,25 +124,18 @@ struct TextBlockCell: View {
     private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Rectangle()
-                    .fill(ColosseumTheme.canvas)
-                Text(block.textBody.isEmpty ? "Empty note" : block.textBody)
-                    .font(.system(size: 12))
-                    .foregroundStyle(ColosseumTheme.primaryText)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(12)
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
-
-            Text(block.displayTitle)
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
-                .lineLimit(1)
+        ZStack {
+            Rectangle()
+                .fill(ColosseumTheme.canvas)
+            Text(block.textBody.isEmpty ? "Empty note" : block.textBody)
+                .font(.system(size: 12))
+                .foregroundStyle(ColosseumTheme.primaryText)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(12)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
     }
 }
 
@@ -164,30 +144,23 @@ struct LinkBlockCell: View {
     private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Rectangle()
-                    .fill(ColosseumTheme.surface)
-                VStack(spacing: 8) {
-                    Image(systemName: "link")
-                        .font(.system(size: 20, weight: .light))
-                        .foregroundStyle(ColosseumTheme.secondaryText)
-                    Text(block.displayTitle)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.primaryText)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(4)
-                        .padding(.horizontal, 10)
-                }
+        ZStack {
+            Rectangle()
+                .fill(ColosseumTheme.surface)
+            VStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.system(size: 20, weight: .light))
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                Text(block.displayTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                    .padding(.horizontal, 10)
             }
-            .aspectRatio(1, contentMode: .fit)
-            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
-
-            Text(block.sourceURL ?? "Link")
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
-                .lineLimit(1)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
     }
 }
 
@@ -196,39 +169,33 @@ struct ArenaBlockCell: View {
     private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Rectangle()
-                    .fill(ColosseumTheme.canvas)
-                VStack(spacing: 6) {
-                    Text(block.title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.primaryText)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                    if let owner = block.arenaOwnerName {
-                        Text("by \(owner)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(ColosseumTheme.secondaryText)
-                    }
-                    Text("\(block.arenaBlockCount) blocks")
+        ZStack {
+            Rectangle()
+                .fill(ColosseumTheme.canvas)
+            VStack(spacing: 6) {
+                Text(block.title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                if let owner = block.arenaOwnerName {
+                    Text("by \(owner)")
                         .font(.system(size: 11))
                         .foregroundStyle(ColosseumTheme.secondaryText)
-                    if let updated = block.arenaUpdatedAt {
-                        Text(ColosseumFormatters.relativeDate(updated))
-                            .font(.system(size: 11))
-                            .foregroundStyle(ColosseumTheme.tertiaryText)
-                    }
                 }
-                .padding(14)
+                Text("\(block.arenaBlockCount) blocks")
+                    .font(.system(size: 11))
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                if let updated = block.arenaUpdatedAt {
+                    Text(ColosseumFormatters.relativeDate(updated))
+                        .font(.system(size: 11))
+                        .foregroundStyle(ColosseumTheme.tertiaryText)
+                }
             }
-            .aspectRatio(1, contentMode: .fit)
-            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
-
-            Text("are.na · browse")
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
+            .padding(14)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
     }
 }
 
@@ -237,35 +204,28 @@ struct NestedBoardCell: View {
     private var tags: [String] { TagParser.tags(in: board.notes) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Rectangle()
-                    .fill(ColosseumTheme.canvas)
-                VStack(spacing: 6) {
-                    Text(board.title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(ColosseumTheme.primaryText)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                    Text("\(board.contentCount) blocks")
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.secondaryText)
-                    Text(ColosseumFormatters.relativeDate(board.updatedAt))
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                    Text(ColosseumFormatters.byteCount(board.storageBytes))
-                        .font(.system(size: 11))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
-                }
-                .padding(14)
+        ZStack {
+            Rectangle()
+                .fill(ColosseumTheme.canvas)
+            VStack(spacing: 6) {
+                Text(board.title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                Text("\(board.contentCount) blocks")
+                    .font(.system(size: 11))
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                Text(ColosseumFormatters.relativeDate(board.updatedAt))
+                    .font(.system(size: 11))
+                    .foregroundStyle(ColosseumTheme.tertiaryText)
+                Text(ColosseumFormatters.byteCount(board.storageBytes))
+                    .font(.system(size: 11))
+                    .foregroundStyle(ColosseumTheme.tertiaryText)
             }
-            .aspectRatio(1, contentMode: .fit)
-            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
-
-            Text(board.title)
-                .font(.system(size: 11))
-                .foregroundStyle(ColosseumTheme.secondaryText)
-                .lineLimit(1)
+            .padding(14)
         }
+        .aspectRatio(1, contentMode: .fit)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
     }
 }
