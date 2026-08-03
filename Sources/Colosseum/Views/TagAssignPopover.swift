@@ -20,12 +20,6 @@ struct TagAssignPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Tags")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(ColosseumTheme.tertiaryText)
-                .textCase(.uppercase)
-                .tracking(0.6)
-
             if tags.isEmpty {
                 Text("No tags on this board")
                     .font(.system(size: 11))
