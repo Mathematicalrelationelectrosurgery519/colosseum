@@ -75,7 +75,11 @@ struct BoardOverviewView: View {
     }
 
     var body: some View {
-        boardStack
+        applyBoardInteractions(to: applyBoardChrome(to: boardStack))
+    }
+
+    private func applyBoardChrome<V: View>(to view: V) -> some View {
+        view
             .animation(ColosseumMotion.overlay, value: selectedConnectionID)
             .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
             .navigationTitle("")
@@ -108,7 +112,25 @@ struct BoardOverviewView: View {
                     visible: isBrowsingGrid
                 )
             }
-            .background { boardKeyEquivalents }
+    }
+
+    private func applyBoardInteractions<V: View>(to view: V) -> some View {
+        view
+            .background {
+                Group {
+                    Button("") {
+                        renameTitle = board.title
+                        showRename = true
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    Button("") { setTagMatchMode(.intersection) }
+                        .keyboardShortcut("n", modifiers: [])
+                    Button("") { setTagMatchMode(.union) }
+                        .keyboardShortcut("u", modifiers: [])
+                }
+                .opacity(0)
+                .allowsHitTesting(false)
+            }
             .focusable()
             .focused($boardFocused)
             .focusEffectDisabled()
@@ -126,46 +148,12 @@ struct BoardOverviewView: View {
                     self.gridFocusID = ids.first
                 }
             }
+            .onChange(of: availableTags) { _, tags in
+                let keys = Set(tags.map { TagParser.normalize($0) })
+                selectedTags = selectedTags.intersection(keys)
+                tagSelectionOrder = tagSelectionOrder.filter { keys.contains($0) }
+            }
             .onExitCommand(perform: handleEscape)
-            .onKeyPress(.escape) {
-                handleEscape()
-                return .handled
-            }
-            .onKeyPress(.leftArrow) {
-                guard isBrowsingGrid else { return .ignored }
-                moveGridFocus(delta: -1)
-                return .handled
-            }
-            .onKeyPress(.rightArrow) {
-                guard isBrowsingGrid else { return .ignored }
-                moveGridFocus(delta: 1)
-                return .handled
-            }
-            .onKeyPress(.upArrow) {
-                guard isBrowsingGrid else { return .ignored }
-                moveGridFocus(delta: -columnCount)
-                return .handled
-            }
-            .onKeyPress(.downArrow) {
-                guard isBrowsingGrid else { return .ignored }
-                moveGridFocus(delta: columnCount)
-                return .handled
-            }
-            .onKeyPress(.return) {
-                guard isBrowsingGrid else { return .ignored }
-                activateFocusedConnection()
-                return .handled
-            }
-            .onKeyPress(KeyEquivalent("n"), phases: .down) { press in
-                guard press.modifiers.isEmpty, isBrowsingGrid else { return .ignored }
-                setTagMatchMode(.intersection)
-                return .handled
-            }
-            .onKeyPress(KeyEquivalent("u"), phases: .down) { press in
-                guard press.modifiers.isEmpty, isBrowsingGrid else { return .ignored }
-                setTagMatchMode(.union)
-                return .handled
-            }
             .sheet(isPresented: $showAddSheet) {
                 AddContentSheet(board: board)
             }
@@ -210,32 +198,11 @@ struct BoardOverviewView: View {
             .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenFiles)) { _ in
                 openFiles()
             }
-            .onChange(of: availableTags) { _, tags in
-                let keys = Set(tags.map { TagParser.normalize($0) })
-                selectedTags = selectedTags.intersection(keys)
-                tagSelectionOrder = tagSelectionOrder.filter { keys.contains($0) }
-            }
             .alert("Import Error", isPresented: importErrorPresented) {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
             }
-    }
-
-    private var boardKeyEquivalents: some View {
-        Group {
-            Button("") {
-                renameTitle = board.title
-                showRename = true
-            }
-            .keyboardShortcut("r", modifiers: .command)
-            Button("") { setTagMatchMode(.intersection) }
-                .keyboardShortcut("n", modifiers: [])
-            Button("") { setTagMatchMode(.union) }
-                .keyboardShortcut("u", modifiers: [])
-        }
-        .opacity(0)
-        .allowsHitTesting(false)
     }
 
     private func setTagMatchMode(_ mode: TagMatchMode) {
