@@ -116,8 +116,8 @@ struct ColosseumApp: App {
 private func menuBarTemplateImage(from image: NSImage) -> NSImage {
     let copy = image.copy() as? NSImage ?? image
     copy.isTemplate = true
-    // Draw at menu-bar glyph size; avoid SwiftUI .frame so hit target stays native.
-    copy.size = NSSize(width: 18, height: 18)
+    // Draw larger glyph; avoid SwiftUI .frame so hit target stays native.
+    copy.size = NSSize(width: 22, height: 22)
     return copy
 }
 
