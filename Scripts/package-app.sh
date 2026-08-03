@@ -6,16 +6,30 @@ cd "$ROOT"
 
 APP_NAME="Colosseum"
 BUNDLE_ID="dev.pab.colosseum"
+VERSION="1.0.0"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+ZIP="$DIST/${APP_NAME}-${VERSION}-macos.zip"
 
-echo "Building release…"
-swift build -c release
+INSTALL=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) INSTALL=0 ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Usage: $0 [--no-install]" >&2
+      exit 1
+      ;;
+  esac
+done
 
-BIN="$(swift build -c release --show-bin-path)/$APP_NAME"
+echo "Building universal release (arm64 + x86_64)…"
+swift build -c release --arch arm64 --arch x86_64
+
+BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/$APP_NAME"
 if [[ ! -x "$BIN" ]]; then
   echo "Missing binary at $BIN" >&2
   exit 1
@@ -59,7 +73,7 @@ cat > "$CONTENTS/Info.plist" <<EOF
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0.0</string>
+  <string>${VERSION}</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -75,10 +89,22 @@ EOF
 # Ad-hoc sign so Gatekeeper is less noisy for local installs
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
-INSTALL_DIR="/Applications"
-echo "Installing to $INSTALL_DIR/$APP_NAME.app…"
-rm -rf "$INSTALL_DIR/$APP_NAME.app"
-cp -R "$APP" "$INSTALL_DIR/$APP_NAME.app"
+# Zip for distribution (preserve .app bundle layout; no AppleDouble junk)
+rm -f "$ZIP"
+(
+  cd "$DIST"
+  COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr "$APP_NAME.app" "$(basename "$ZIP")"
+)
 
-echo "Done: $INSTALL_DIR/$APP_NAME.app"
-echo "Launch with: open -a $APP_NAME"
+echo "Packaged: $ZIP"
+
+if [[ "$INSTALL" -eq 1 ]]; then
+  INSTALL_DIR="/Applications"
+  echo "Installing to $INSTALL_DIR/$APP_NAME.app…"
+  rm -rf "$INSTALL_DIR/$APP_NAME.app"
+  cp -R "$APP" "$INSTALL_DIR/$APP_NAME.app"
+  echo "Done: $INSTALL_DIR/$APP_NAME.app"
+  echo "Launch with: open -a $APP_NAME"
+else
+  echo "Skipped install (--no-install)."
+fi
