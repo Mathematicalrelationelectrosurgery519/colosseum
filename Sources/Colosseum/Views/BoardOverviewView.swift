@@ -26,6 +26,9 @@ struct BoardOverviewView: View {
     @State private var isPinching = false
     @State private var pinchDidChange = false
     @State private var suppressGridClicksUntil: Date?
+    @State private var gridFocusID: UUID?
+    @State private var boardKeyMonitor = KeyNavMonitor()
+    @FocusState private var boardFocused: Bool
 
     private var isBrowsingGrid: Bool {
         selectedConnectionID == nil && arenaBrowseTarget == nil
@@ -107,10 +110,50 @@ struct BoardOverviewView: View {
             }
             .background { boardKeyEquivalents }
             .focusable()
+            .focused($boardFocused)
             .focusEffectDisabled()
+            .onAppear { activateBoardFocus() }
+            .onDisappear { boardKeyMonitor.remove() }
+            .onChange(of: isBrowsingGrid) { _, browsing in
+                if browsing {
+                    activateBoardFocus()
+                } else {
+                    boardKeyMonitor.remove()
+                }
+            }
+            .onChange(of: filteredConnections.map(\.id)) { _, ids in
+                if let gridFocusID, !ids.contains(gridFocusID) {
+                    self.gridFocusID = ids.first
+                }
+            }
             .onExitCommand(perform: handleEscape)
             .onKeyPress(.escape) {
                 handleEscape()
+                return .handled
+            }
+            .onKeyPress(.leftArrow) {
+                guard isBrowsingGrid else { return .ignored }
+                moveGridFocus(delta: -1)
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                guard isBrowsingGrid else { return .ignored }
+                moveGridFocus(delta: 1)
+                return .handled
+            }
+            .onKeyPress(.upArrow) {
+                guard isBrowsingGrid else { return .ignored }
+                moveGridFocus(delta: -columnCount)
+                return .handled
+            }
+            .onKeyPress(.downArrow) {
+                guard isBrowsingGrid else { return .ignored }
+                moveGridFocus(delta: columnCount)
+                return .handled
+            }
+            .onKeyPress(.return) {
+                guard isBrowsingGrid else { return .ignored }
+                activateFocusedConnection()
                 return .handled
             }
             .onKeyPress(KeyEquivalent("n"), phases: .down) { press in
@@ -208,6 +251,72 @@ struct BoardOverviewView: View {
         tagSelectionOrder = [key]
     }
 
+    private func activateBoardFocus() {
+        boardFocused = true
+        installBoardKeyMonitor()
+        // Defer one tick so SwiftUI finishes mounting after the home → board fade.
+        DispatchQueue.main.async {
+            boardFocused = true
+            if gridFocusID == nil {
+                gridFocusID = filteredConnections.first?.id
+            }
+        }
+    }
+
+    private func installBoardKeyMonitor() {
+        boardKeyMonitor.onLeft = { moveGridFocus(delta: -1) }
+        boardKeyMonitor.onRight = { moveGridFocus(delta: 1) }
+        boardKeyMonitor.onUp = { moveGridFocus(delta: -columnCount) }
+        boardKeyMonitor.onDown = { moveGridFocus(delta: columnCount) }
+        boardKeyMonitor.onEnter = { activateFocusedConnection() }
+        boardKeyMonitor.onEscape = { handleEscape() }
+        boardKeyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
+        boardKeyMonitor.install()
+    }
+
+    private func moveGridFocus(delta: Int) {
+        guard isBrowsingGrid else { return }
+        let items = filteredConnections
+        guard !items.isEmpty else { return }
+        boardFocused = true
+        if let idx = items.firstIndex(where: { $0.id == gridFocusID }) {
+            let next = idx + delta
+            guard next >= 0, next < items.count else { return }
+            withAnimation(ColosseumMotion.soft) {
+                gridFocusID = items[next].id
+            }
+        } else {
+            withAnimation(ColosseumMotion.soft) {
+                gridFocusID = items[0].id
+            }
+        }
+    }
+
+    private func activateFocusedConnection() {
+        guard isBrowsingGrid else { return }
+        let items = filteredConnections
+        let target = items.first(where: { $0.id == gridFocusID }) ?? items.first
+        guard let connection = target else { return }
+        gridFocusID = connection.id
+        openConnection(connection)
+    }
+
+    private func openConnection(_ connection: Connection) {
+        if let nested = connection.nestedBoard {
+            withAnimation(ColosseumMotion.overlay) {
+                path.append(nested.id)
+            }
+        } else if let block = connection.block {
+            if block.kind == .arenaChannel {
+                openArenaBrowser(for: block)
+            } else {
+                withAnimation(ColosseumMotion.overlay) {
+                    selectedConnectionID = connection.id
+                }
+            }
+        }
+    }
+
     private var boardStack: some View {
         ZStack {
             boardGrid
@@ -222,6 +331,7 @@ struct BoardOverviewView: View {
                         withAnimation(ColosseumMotion.overlay) {
                             selectedConnectionID = nil
                         }
+                        activateBoardFocus()
                     },
                     onTagTap: { tag in
                         withAnimation(ColosseumMotion.overlay) {
@@ -269,6 +379,14 @@ struct BoardOverviewView: View {
 
                 ForEach(filteredConnections, id: \.id) { connection in
                     connectionCell(connection)
+                        .overlay {
+                            if connection.id == gridFocusID, isBrowsingGrid {
+                                Rectangle()
+                                    .stroke(Color.white.opacity(0.85), lineWidth: 2)
+                                    .padding(.bottom, 22)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                         .pointingHandCursor()
                         .transition(ColosseumMotion.itemTransition)
                 }
@@ -288,9 +406,8 @@ struct BoardOverviewView: View {
         if let nested = connection.nestedBoard {
             Button {
                 guard !shouldSuppressGridClicks else { return }
-                withAnimation(ColosseumMotion.overlay) {
-                    path.append(nested.id)
-                }
+                gridFocusID = connection.id
+                openConnection(connection)
             } label: {
                 NestedBoardCell(board: nested)
             }
@@ -299,13 +416,8 @@ struct BoardOverviewView: View {
         } else if let block = connection.block {
             Button {
                 guard !shouldSuppressGridClicks else { return }
-                if block.kind == .arenaChannel {
-                    openArenaBrowser(for: block)
-                } else {
-                    withAnimation(ColosseumMotion.overlay) {
-                        selectedConnectionID = connection.id
-                    }
-                }
+                gridFocusID = connection.id
+                openConnection(connection)
             } label: {
                 switch block.kind {
                 case .image, .video:

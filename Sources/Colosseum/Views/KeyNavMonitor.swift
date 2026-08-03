@@ -5,9 +5,13 @@ import AppKit
 final class KeyNavMonitor {
     var onLeft: (() -> Void)?
     var onRight: (() -> Void)?
+    var onUp: (() -> Void)?
+    var onDown: (() -> Void)?
+    var onEnter: (() -> Void)?
+    var onTab: (() -> Void)?
     var onEscape: (() -> Void)?
-    /// When true, arrow keys are left alone (e.g. text caret movement).
-    var shouldIgnoreArrows: (() -> Bool)?
+    /// When true, arrow / enter keys are left alone (e.g. text caret movement).
+    var shouldIgnoreNavigation: (() -> Bool)?
 
     private var monitor: Any?
 
@@ -23,17 +27,48 @@ final class KeyNavMonitor {
                 }
                 return event
             }
-            if self.shouldIgnoreArrows?() == true {
+            if self.shouldIgnoreNavigation?() == true {
+                if event.keyCode == 53 {
+                    DispatchQueue.main.async { self.onEscape?() }
+                    return nil
+                }
                 return event
             }
             switch event.keyCode {
-            case 123:
+            case 123: // left
                 DispatchQueue.main.async { self.onLeft?() }
                 return nil
-            case 124:
+            case 124: // right
                 DispatchQueue.main.async { self.onRight?() }
                 return nil
-            case 53:
+            case 126: // up
+                if let onUp = self.onUp {
+                    DispatchQueue.main.async { onUp() }
+                    return nil
+                }
+                return event
+            case 125: // down
+                if let onDown = self.onDown {
+                    DispatchQueue.main.async { onDown() }
+                    return nil
+                }
+                return event
+            case 36, 76: // return / keypad enter
+                // Let ⌘↩ through for menu shortcuts (new board / add).
+                if event.modifierFlags.contains(.command) { return event }
+                if let onEnter = self.onEnter {
+                    DispatchQueue.main.async { onEnter() }
+                    return nil
+                }
+                return event
+            case 48: // tab
+                if event.modifierFlags.contains(.shift) { return event }
+                if let onTab = self.onTab {
+                    DispatchQueue.main.async { onTab() }
+                    return nil
+                }
+                return event
+            case 53: // escape
                 DispatchQueue.main.async { self.onEscape?() }
                 return nil
             default:

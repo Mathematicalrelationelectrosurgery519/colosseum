@@ -6,6 +6,8 @@ struct NotesEditor: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String = "notes..."
     var onTagTap: (String) -> Void
+    /// Increment to force the field to become first responder (e.g. Tab in block preview).
+    var focusNonce: Int = 0
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -58,6 +60,12 @@ struct NotesEditor: NSViewRepresentable {
             let max = (textView.string as NSString).length
             textView.setSelectedRange(NSRange(location: min(selected.location, max), length: 0))
         }
+        if focusNonce != context.coordinator.lastFocusNonce {
+            context.coordinator.lastFocusNonce = focusNonce
+            DispatchQueue.main.async {
+                scroll.window?.makeFirstResponder(textView)
+            }
+        }
         textView.needsDisplay = true
     }
 
@@ -65,6 +73,7 @@ struct NotesEditor: NSViewRepresentable {
         var parent: NotesEditor
         weak var textView: TagAwareTextView?
         private var applying = false
+        var lastFocusNonce = 0
 
         init(_ parent: NotesEditor) {
             self.parent = parent

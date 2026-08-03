@@ -16,6 +16,7 @@ struct BlockView: View {
     @State private var showMeta = false
     @State private var loopingPlayer: LoopingVideoPlayer?
     @State private var keyMonitor = KeyNavMonitor()
+    @State private var notesFocusNonce = 0
     @FocusState private var focused: Bool
 
     private var index: Int {
@@ -47,6 +48,7 @@ struct BlockView: View {
             HStack(spacing: 10) {
                 ShortcutHint(text: "←")
                 ShortcutHint(text: "→")
+                ShortcutHint(text: "tab")
                 ShortcutHint(text: "esc")
             }
             .padding(16)
@@ -60,6 +62,10 @@ struct BlockView: View {
             reloadPlayer()
             keyMonitor.onLeft = { step(-1) }
             keyMonitor.onRight = { step(1) }
+            keyMonitor.onTab = {
+                notesFocusNonce += 1
+                focused = false
+            }
             keyMonitor.onEscape = onClose
             keyMonitor.install()
         }
@@ -84,6 +90,11 @@ struct BlockView: View {
         }
         .onKeyPress(.rightArrow) {
             step(1)
+            return .handled
+        }
+        .onKeyPress(.tab) {
+            notesFocusNonce += 1
+            focused = false
             return .handled
         }
         .onMoveCommand { direction in
@@ -321,7 +332,8 @@ struct BlockView: View {
                 }
             ),
             placeholder: "notes...",
-            onTagTap: onTagTap
+            onTagTap: onTagTap,
+            focusNonce: notesFocusNonce
         )
         .frame(minHeight: 72, maxHeight: 160)
         .fixedSize(horizontal: false, vertical: true)
