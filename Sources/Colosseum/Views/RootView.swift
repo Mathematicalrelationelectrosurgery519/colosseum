@@ -9,20 +9,43 @@ struct RootView: View {
     @State private var search = ""
     @State private var showNewBoardAlert = false
     @State private var newBoardTitle = ""
+    @State private var showImportArena = false
+    @State private var arenaBrowseTarget: ArenaBrowseTarget?
 
     var body: some View {
-        NavigationStack(path: $path) {
-            BoardLibraryView(
-                boards: filteredBoards,
-                search: $search,
-                onOpen: { path.append($0.id) },
-                onCreate: { showNewBoardAlert = true }
-            )
-            .navigationDestination(for: UUID.self) { boardID in
-                BoardRouteView(boardID: boardID, path: $path)
+        ZStack {
+            NavigationStack(path: $path) {
+                BoardLibraryView(
+                    boards: filteredBoards,
+                    search: $search,
+                    onOpen: { path.append($0.id) },
+                    onCreate: { showNewBoardAlert = true },
+                    onImportArena: { showImportArena = true }
+                )
+                .navigationDestination(for: UUID.self) { boardID in
+                    BoardRouteView(boardID: boardID, path: $path)
+                }
+            }
+            .colosseumCanvas()
+
+            if let arenaBrowseTarget {
+                ArenaBrowserView(
+                    initialTarget: arenaBrowseTarget,
+                    destinationBoard: nil,
+                    onClose: {
+                        withAnimation(ColosseumMotion.overlay) {
+                            self.arenaBrowseTarget = nil
+                        }
+                    },
+                    onImportedBoard: { board in
+                        path.append(board.id)
+                    }
+                )
+                .transition(ColosseumMotion.overlayTransition)
+                .zIndex(30)
             }
         }
-        .colosseumCanvas()
+        .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
         .alert("New Board", isPresented: $showNewBoardAlert) {
             TextField("Title", text: $newBoardTitle)
             Button("Create") { createBoard() }
@@ -30,9 +53,24 @@ struct RootView: View {
         } message: {
             Text("Name your board. You can rename it later.")
         }
+        .sheet(isPresented: $showImportArena) {
+            ImportArenaSheet(
+                onImported: { board in
+                    path.append(board.id)
+                },
+                onBrowse: { target in
+                    withAnimation(ColosseumMotion.overlay) {
+                        arenaBrowseTarget = target
+                    }
+                }
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumNewBoard)) { _ in
             newBoardTitle = ""
             showNewBoardAlert = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumImportArena)) { _ in
+            showImportArena = true
         }
     }
 

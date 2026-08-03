@@ -6,6 +6,7 @@ struct BoardLibraryView: View {
     @Binding var search: String
     var onOpen: (Board) -> Void
     var onCreate: () -> Void
+    var onImportArena: () -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: ColosseumTheme.gridGap)]
 
@@ -22,6 +23,10 @@ struct BoardLibraryView: View {
                             .foregroundStyle(ColosseumTheme.secondaryText)
                     }
                     Spacer()
+                    Button(action: onImportArena) {
+                        Label("Are.na", systemImage: "arrow.down.left.and.arrow.up.right")
+                    }
+                    .buttonStyle(.bordered)
                     Button(action: onCreate) {
                         Label("New Board", systemImage: "plus")
                     }
@@ -55,6 +60,8 @@ struct BoardLibraryView: View {
         .background(ColosseumTheme.canvas)
         .navigationTitle("")
         .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbarColorScheme(.dark, for: .windowToolbar)
     }
 
     private var emptyState: some View {
@@ -62,15 +69,19 @@ struct BoardLibraryView: View {
             Text("No boards yet")
                 .font(.title3)
                 .foregroundStyle(ColosseumTheme.primaryText)
-            Text("Create a board and drop in images, videos, links, or notes.")
+            Text("Create a board, or browse / import a public Are.na channel.")
                 .font(.callout)
                 .foregroundStyle(ColosseumTheme.secondaryText)
                 .multilineTextAlignment(.center)
-            Button("New Board", action: onCreate)
-                .buttonStyle(.borderedProminent)
-                .tint(.white)
-                .foregroundStyle(.black)
-                .padding(.top, 8)
+            HStack(spacing: 12) {
+                Button("Are.na", action: onImportArena)
+                    .buttonStyle(.bordered)
+                Button("New Board", action: onCreate)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(.black)
+            }
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 80)
@@ -96,6 +107,9 @@ struct BoardCardView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(ColosseumTheme.secondaryText)
                     Text(ColosseumFormatters.relativeDate(board.updatedAt))
+                        .font(.system(size: 11))
+                        .foregroundStyle(ColosseumTheme.tertiaryText)
+                    Text(ColosseumFormatters.byteCount(board.storageBytes))
                         .font(.system(size: 11))
                         .foregroundStyle(ColosseumTheme.tertiaryText)
                 }

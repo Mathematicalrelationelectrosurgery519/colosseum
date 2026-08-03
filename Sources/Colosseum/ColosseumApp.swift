@@ -49,6 +49,13 @@ struct ColosseumApp: App {
                     NotificationCenter.default.post(name: .colosseumOpenFiles, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Divider()
+
+                Button("Browse or Import Are.na…") {
+                    NotificationCenter.default.post(name: .colosseumImportArena, object: nil)
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
             }
         }
     }
@@ -59,4 +66,5 @@ extension Notification.Name {
     static let colosseumAdd = Notification.Name("colosseum.add")
     static let colosseumPaste = Notification.Name("colosseum.paste")
     static let colosseumOpenFiles = Notification.Name("colosseum.openFiles")
+    static let colosseumImportArena = Notification.Name("colosseum.importArena")
 }

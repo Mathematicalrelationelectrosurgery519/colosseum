@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
 struct AddBlockCell: View {
@@ -22,7 +23,7 @@ struct AddBlockCell: View {
                 }
             }
             .aspectRatio(1, contentMode: .fit)
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+            .blockTagBorder(tags: [], lineWidth: 1)
 
             Text("Add")
                 .font(.system(size: 11))
@@ -34,23 +35,55 @@ struct AddBlockCell: View {
 struct MediaBlockCell: View {
     let block: Block
 
+    @State private var isHovering = false
+    @State private var hoverPlayer: LoopingVideoPlayer?
+
+    private var tags: [String] { TagParser.tags(in: block.notes) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomTrailing) {
-                thumbnail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .aspectRatio(1, contentMode: .fit)
-                    .clipped()
-                    .background(ColosseumTheme.surface)
+                Group {
+                    if block.kind == .video, isHovering, let hoverPlayer {
+                        PlayerView(
+                            player: hoverPlayer.player,
+                            showsControls: false,
+                            videoGravity: .resizeAspect
+                        )
+                        .allowsHitTesting(false)
+                        .transition(ColosseumMotion.fade)
+                    } else {
+                        thumbnail
+                            .transition(ColosseumMotion.fade)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .clipped()
+                .background(ColosseumTheme.surface)
+                .animation(ColosseumMotion.soft, value: isHovering)
 
-                if block.kind == .video {
+                if block.kind == .video, !isHovering {
                     Image(systemName: "play.rectangle")
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.9))
                         .padding(8)
+                        .transition(ColosseumMotion.fade)
                 }
             }
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 0.5))
+            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : 1.5)
+            .onHover { hovering in
+                guard block.kind == .video else { return }
+                withAnimation(ColosseumMotion.soft) {
+                    isHovering = hovering
+                }
+                if hovering {
+                    startHoverPlayback()
+                } else {
+                    stopHoverPlayback()
+                }
+            }
+            .onDisappear { stopHoverPlayback() }
 
             Text(block.displayTitle)
                 .font(.system(size: 11))
@@ -83,10 +116,25 @@ struct MediaBlockCell: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(ColosseumTheme.surface)
     }
+
+    private func startHoverPlayback() {
+        stopHoverPlayback()
+        guard let path = block.localRelativePath else { return }
+        let url = MediaLibrary.absoluteURL(relativePath: path)
+        let player = VideoPlayback.looping(url: url, muted: true)
+        hoverPlayer = player
+        player.play()
+    }
+
+    private func stopHoverPlayback() {
+        hoverPlayer?.stop()
+        hoverPlayer = nil
+    }
 }
 
 struct TextBlockCell: View {
     let block: Block
+    private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -101,7 +149,7 @@ struct TextBlockCell: View {
                     .padding(12)
             }
             .aspectRatio(1, contentMode: .fit)
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
 
             Text(block.displayTitle)
                 .font(.system(size: 11))
@@ -113,6 +161,7 @@ struct TextBlockCell: View {
 
 struct LinkBlockCell: View {
     let block: Block
+    private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -132,7 +181,7 @@ struct LinkBlockCell: View {
                 }
             }
             .aspectRatio(1, contentMode: .fit)
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
 
             Text(block.sourceURL ?? "Link")
                 .font(.system(size: 11))
@@ -144,6 +193,7 @@ struct LinkBlockCell: View {
 
 struct ArenaBlockCell: View {
     let block: Block
+    private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -173,9 +223,9 @@ struct ArenaBlockCell: View {
                 .padding(14)
             }
             .aspectRatio(1, contentMode: .fit)
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
 
-            Text("are.na")
+            Text("are.na · browse")
                 .font(.system(size: 11))
                 .foregroundStyle(ColosseumTheme.secondaryText)
         }
@@ -184,6 +234,7 @@ struct ArenaBlockCell: View {
 
 struct NestedBoardCell: View {
     let board: Board
+    private var tags: [String] { TagParser.tags(in: board.notes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -202,11 +253,14 @@ struct NestedBoardCell: View {
                     Text(ColosseumFormatters.relativeDate(board.updatedAt))
                         .font(.system(size: 11))
                         .foregroundStyle(ColosseumTheme.tertiaryText)
+                    Text(ColosseumFormatters.byteCount(board.storageBytes))
+                        .font(.system(size: 11))
+                        .foregroundStyle(ColosseumTheme.tertiaryText)
                 }
                 .padding(14)
             }
             .aspectRatio(1, contentMode: .fit)
-            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+            .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
 
             Text(board.title)
                 .font(.system(size: 11))

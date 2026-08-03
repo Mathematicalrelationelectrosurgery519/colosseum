@@ -8,7 +8,11 @@ let package = Package(
         .executableTarget(
             name: "Colosseum",
             path: "Sources/Colosseum",
-            resources: [.process("Resources")]
+            resources: [.process("Resources")],
+            linkerSettings: [
+                .linkedFramework("AVKit"),
+                .linkedFramework("AVFoundation")
+            ]
         )
     ]
 )

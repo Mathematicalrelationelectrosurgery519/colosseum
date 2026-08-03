@@ -10,17 +10,31 @@ struct BoardOverviewView: View {
     @Environment(\.modelContext) private var context
 
     @State private var selectedConnectionID: UUID?
+    @State private var arenaBrowseTarget: ArenaBrowseTarget?
     @State private var showAddSheet = false
     @State private var showRename = false
     @State private var renameTitle = ""
     @State private var isImporting = false
     @State private var errorMessage: String?
     @State private var isTargeted = false
+    @State private var selectedTags: Set<String> = []
+    @State private var tagMatchMode: TagMatchMode = .intersection
 
     private let columns = [GridItem(.adaptive(minimum: ColosseumTheme.cellMin, maximum: 260), spacing: ColosseumTheme.gridGap)]
 
     private var connections: [Connection] {
         board.sortedConnections
+    }
+
+    private var availableTags: [String] {
+        TagParser.boardTags(from: board)
+    }
+
+    private var filteredConnections: [Connection] {
+        guard !selectedTags.isEmpty else { return connections }
+        return connections.filter {
+            TagParser.matches(connection: $0, selected: selectedTags, mode: tagMatchMode)
+        }
     }
 
     private var selectedConnection: Connection? {
@@ -29,35 +43,83 @@ struct BoardOverviewView: View {
 
     var body: some View {
         ZStack {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                    Button {
-                        showAddSheet = true
-                    } label: {
-                        AddBlockCell()
-                    }
-                    .buttonStyle(.plain)
+            VStack(spacing: 0) {
+                TagFilterBar(
+                    tags: availableTags,
+                    selected: $selectedTags,
+                    mode: $tagMatchMode
+                )
+                .animation(ColosseumMotion.soft, value: availableTags)
 
-                    ForEach(connections, id: \.id) { connection in
-                        connectionCell(connection)
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                        Button {
+                            showAddSheet = true
+                        } label: {
+                            AddBlockCell()
+                        }
+                        .buttonStyle(.plain)
+                        .pointingHandCursor()
+
+                        ForEach(filteredConnections, id: \.id) { connection in
+                            connectionCell(connection)
+                                .pointingHandCursor()
+                                .transition(ColosseumMotion.itemTransition)
+                        }
                     }
+                    .padding(28)
+                    .padding(.top, availableTags.isEmpty ? 0 : 8)
+                    .animation(ColosseumMotion.standard, value: selectedTags)
+                    .animation(ColosseumMotion.standard, value: tagMatchMode)
+                    .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
                 }
-                .padding(28)
             }
             .background(ColosseumTheme.canvas)
 
-            if let connection = selectedConnection, connection.block != nil {
+            if let connection = selectedConnection, let block = connection.block, block.kind != .arenaChannel {
                 BlockView(
                     board: board,
-                    connections: connections.filter { $0.block != nil },
+                    connections: connections.filter { $0.block != nil && $0.block?.kind != .arenaChannel },
                     selectedID: $selectedConnectionID,
-                    onClose: { selectedConnectionID = nil }
+                    onClose: {
+                        withAnimation(ColosseumMotion.overlay) {
+                            selectedConnectionID = nil
+                        }
+                    },
+                    onTagTap: { tag in
+                        withAnimation(ColosseumMotion.overlay) {
+                            selectedConnectionID = nil
+                            selectedTags = [TagParser.normalize(tag)]
+                        }
+                    }
                 )
-                .transition(.opacity)
+                .transition(ColosseumMotion.overlayTransition)
                 .zIndex(10)
             }
+
+            if let arenaBrowseTarget {
+                ArenaBrowserView(
+                    initialTarget: arenaBrowseTarget,
+                    destinationBoard: board,
+                    onClose: {
+                        withAnimation(ColosseumMotion.overlay) {
+                            self.arenaBrowseTarget = nil
+                        }
+                    },
+                    onImportedBoard: { imported in
+                        path.append(imported.id)
+                    }
+                )
+                .transition(ColosseumMotion.overlayTransition)
+                .zIndex(20)
+            }
         }
+        .animation(ColosseumMotion.overlay, value: selectedConnectionID)
+        .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
         .navigationTitle(board.title)
+        .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbarColorScheme(.dark, for: .windowToolbar)
         .toolbar {
             ToolbarItemGroup {
                 if isImporting {
@@ -65,10 +127,12 @@ struct BoardOverviewView: View {
                 }
                 Button("Add") { showAddSheet = true }
                     .keyboardShortcut(.return, modifiers: .command)
+                    .pointingHandCursor()
                 Button("Rename") {
                     renameTitle = board.title
                     showRename = true
                 }
+                .pointingHandCursor()
             }
         }
         .sheet(isPresented: $showAddSheet) {
@@ -119,7 +183,9 @@ struct BoardOverviewView: View {
     private func connectionCell(_ connection: Connection) -> some View {
         if let nested = connection.nestedBoard {
             Button {
-                path.append(nested.id)
+                withAnimation(ColosseumMotion.soft) {
+                    path.append(nested.id)
+                }
             } label: {
                 NestedBoardCell(board: nested)
             }
@@ -127,7 +193,13 @@ struct BoardOverviewView: View {
             .contextMenu { connectionMenu(connection) }
         } else if let block = connection.block {
             Button {
-                selectedConnectionID = connection.id
+                if block.kind == .arenaChannel {
+                    openArenaBrowser(for: block)
+                } else {
+                    withAnimation(ColosseumMotion.overlay) {
+                        selectedConnectionID = connection.id
+                    }
+                }
             } label: {
                 switch block.kind {
                 case .image, .video:
@@ -147,10 +219,12 @@ struct BoardOverviewView: View {
 
     @ViewBuilder
     private func connectionMenu(_ connection: Connection) -> some View {
-        if let block = connection.block, block.kind == .arenaChannel,
-           let urlString = block.arenaURL ?? block.sourceURL,
-           let url = URL(string: urlString) {
-            Button("Open on Are.na") { NSWorkspace.shared.open(url) }
+        if let block = connection.block, block.kind == .arenaChannel {
+            Button("Browse in Colosseum") { openArenaBrowser(for: block) }
+            if let urlString = block.arenaURL ?? block.sourceURL,
+               let url = URL(string: urlString) {
+                Button("Open on Are.na") { NSWorkspace.shared.open(url) }
+            }
         }
         if let nested = connection.nestedBoard {
             Button("Open Board") { path.append(nested.id) }
@@ -159,6 +233,14 @@ struct BoardOverviewView: View {
         Button("Remove from Board", role: .destructive) {
             ImportService.removeConnection(connection, deleteOrphanedBlock: true, context: context)
             try? context.save()
+        }
+    }
+
+    private func openArenaBrowser(for block: Block) {
+        let slug = block.arenaSlug ?? ""
+        guard !slug.isEmpty || block.arenaURL != nil || block.sourceURL != nil else { return }
+        withAnimation(ColosseumMotion.overlay) {
+            arenaBrowseTarget = ArenaBrowseTarget(block: block)
         }
     }
 

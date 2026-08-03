@@ -1,5 +1,5 @@
 import AppKit
-import AVKit
+import AVFoundation
 import SwiftData
 import SwiftUI
 
@@ -8,25 +8,22 @@ struct BlockView: View {
     let connections: [Connection]
     @Binding var selectedID: UUID?
     var onClose: () -> Void
+    var onTagTap: (String) -> Void = { _ in }
 
     @Environment(\.modelContext) private var context
 
     @State private var showConnect = false
-    @State private var sidebarTab: SidebarTab = .connections
-    @State private var player: AVPlayer?
+    @State private var loopingPlayer: LoopingVideoPlayer?
+    @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
 
-    enum SidebarTab: String, CaseIterable {
-        case connections = "Connections"
-        case notes = "Notes"
-    }
-
     private var index: Int {
-        connections.firstIndex(where: { $0.id == selectedID }) ?? 0
+        guard let selectedID else { return 0 }
+        return connections.firstIndex(where: { $0.id == selectedID }) ?? 0
     }
 
     private var connection: Connection? {
-        guard index >= 0, index < connections.count else { return nil }
+        guard !connections.isEmpty, index >= 0, index < connections.count else { return nil }
         return connections[index]
     }
 
@@ -36,6 +33,8 @@ struct BlockView: View {
         HStack(spacing: 0) {
             mediaPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { focused = true }
 
             Divider().overlay(ColosseumTheme.border)
 
@@ -45,20 +44,55 @@ struct BlockView: View {
         .background(ColosseumTheme.canvas)
         .focusable()
         .focused($focused)
+        .focusEffectDisabled()
         .onAppear {
             focused = true
             reloadPlayer()
+            keyMonitor.onLeft = { step(-1) }
+            keyMonitor.onRight = { step(1) }
+            keyMonitor.onEscape = onClose
+            keyMonitor.install()
+        }
+        .onDisappear {
+            keyMonitor.remove()
+            loopingPlayer?.stop()
+            loopingPlayer = nil
         }
         .onChange(of: selectedID) { _, _ in
+            focused = true
             reloadPlayer()
         }
         .onExitCommand(perform: onClose)
+        .onKeyPress(.escape) {
+            onClose()
+            return .handled
+        }
+        .onKeyPress(.leftArrow) {
+            step(-1)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            step(1)
+            return .handled
+        }
         .onMoveCommand { direction in
             switch direction {
             case .left: step(-1)
             case .right: step(1)
             default: break
             }
+        }
+        .background {
+            HStack {
+                Button("", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                Button("", action: { step(-1) })
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                Button("", action: { step(1) })
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
         }
         .sheet(isPresented: $showConnect) {
             if let block {
@@ -72,67 +106,75 @@ struct BlockView: View {
         ZStack {
             ColosseumTheme.canvas
             if let block {
-                switch block.kind {
-                case .image:
-                    if let path = block.localRelativePath {
-                        let url = MediaLibrary.absoluteURL(relativePath: path)
-                        if let image = NSImage(contentsOf: url) {
-                            Image(nsImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .padding(24)
-                        }
-                    }
-                case .video:
-                    if let player {
-                        VideoPlayer(player: player)
-                            .padding(24)
-                    }
-                case .text:
-                    ScrollView {
-                        Text(block.textBody)
-                            .font(.system(size: 18))
-                            .foregroundStyle(ColosseumTheme.primaryText)
-                            .frame(maxWidth: 640, alignment: .leading)
-                            .padding(40)
-                    }
-                case .link:
-                    VStack(spacing: 16) {
-                        Image(systemName: "link")
-                            .font(.system(size: 36, weight: .light))
-                            .foregroundStyle(ColosseumTheme.secondaryText)
-                        Text(block.displayTitle)
-                            .font(.title2)
-                            .foregroundStyle(ColosseumTheme.primaryText)
-                            .multilineTextAlignment(.center)
-                        if let source = block.sourceURL, let url = URL(string: source) {
-                            Button("Open Link") { NSWorkspace.shared.open(url) }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.white)
-                                .foregroundStyle(.black)
-                        }
-                    }
+                mediaContent(for: block)
+                    .id(block.id)
+                    .transition(ColosseumMotion.fade)
+            }
+        }
+        .animation(ColosseumMotion.standard, value: selectedID)
+    }
+
+    @ViewBuilder
+    private func mediaContent(for block: Block) -> some View {
+        switch block.kind {
+        case .image:
+            if let path = block.localRelativePath {
+                let url = MediaLibrary.absoluteURL(relativePath: path)
+                if let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(24)
+                }
+            }
+        case .video:
+            if let loopingPlayer {
+                PlayerView(player: loopingPlayer.player)
+                    .padding(24)
+            }
+        case .text:
+            ScrollView {
+                Text(block.textBody)
+                    .font(.system(size: 18))
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .frame(maxWidth: 640, alignment: .leading)
                     .padding(40)
-                case .arenaChannel:
-                    VStack(spacing: 12) {
-                        Text(block.title)
-                            .font(.title)
-                            .foregroundStyle(ColosseumTheme.primaryText)
-                        if let owner = block.arenaOwnerName {
-                            Text("by \(owner)")
-                                .foregroundStyle(ColosseumTheme.secondaryText)
-                        }
-                        Text("\(block.arenaBlockCount) blocks")
-                            .foregroundStyle(ColosseumTheme.secondaryText)
-                        if let urlString = block.arenaURL ?? block.sourceURL,
-                           let url = URL(string: urlString) {
-                            Button("Open on Are.na") { NSWorkspace.shared.open(url) }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.white)
-                                .foregroundStyle(.black)
-                                .padding(.top, 8)
-                        }
-                    }
+            }
+        case .link:
+            VStack(spacing: 16) {
+                Image(systemName: "link")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                Text(block.displayTitle)
+                    .font(.title2)
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .multilineTextAlignment(.center)
+                if let source = block.sourceURL, let url = URL(string: source) {
+                    Button("Open Link") { NSWorkspace.shared.open(url) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.white)
+                        .foregroundStyle(.black)
+                }
+            }
+            .padding(40)
+        case .arenaChannel:
+            VStack(spacing: 12) {
+                Text(block.title)
+                    .font(.title)
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                if let owner = block.arenaOwnerName {
+                    Text("by \(owner)")
+                        .foregroundStyle(ColosseumTheme.secondaryText)
+                }
+                Text("\(block.arenaBlockCount) blocks")
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                if let urlString = block.arenaURL ?? block.sourceURL,
+                   let url = URL(string: urlString) {
+                    Button("Open on Are.na") { NSWorkspace.shared.open(url) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.white)
+                        .foregroundStyle(.black)
+                        .padding(.top, 8)
                 }
             }
         }
@@ -177,18 +219,20 @@ struct BlockView: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(ColosseumTheme.primaryText)
 
-                        TextField(
-                            block.notes.isEmpty ? "No description." : "Description",
-                            text: Binding(
-                                get: { block.notes },
-                                set: { block.notes = $0 }
-                            ),
-                            axis: .vertical
-                        )
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundStyle(ColosseumTheme.secondaryText)
-                        .lineLimit(3...8)
+                        notesSection(for: block)
+
+                        if block.kind == .text {
+                            TextEditor(text: Binding(
+                                get: { block.textBody },
+                                set: { block.textBody = $0 }
+                            ))
+                            .font(.system(size: 13))
+                            .frame(minHeight: 100)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+                            .background(ColosseumTheme.surface)
+                            .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 0.5))
+                        }
 
                         metaTable(for: block)
 
@@ -230,40 +274,12 @@ struct BlockView: View {
                             .menuStyle(.borderlessButton)
                         }
 
-                        Picker("", selection: $sidebarTab) {
-                            ForEach(SidebarTab.allCases, id: \.self) { tab in
-                                if tab == .connections {
-                                    Text("Connections \(block.connections.count)").tag(tab)
-                                } else {
-                                    Text(tab.rawValue).tag(tab)
-                                }
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.top, 8)
+                        Text("Connections \(block.connections.count)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(ColosseumTheme.secondaryText)
+                            .padding(.top, 8)
 
-                        switch sidebarTab {
-                        case .connections:
-                            connectionsList(for: block)
-                        case .notes:
-                            if block.kind == .text {
-                                TextEditor(text: Binding(
-                                    get: { block.textBody },
-                                    set: { block.textBody = $0 }
-                                ))
-                                .frame(minHeight: 160)
-                                .scrollContentBackground(.hidden)
-                                .background(ColosseumTheme.surface)
-                            } else {
-                                TextEditor(text: Binding(
-                                    get: { block.notes },
-                                    set: { block.notes = $0 }
-                                ))
-                                .frame(minHeight: 160)
-                                .scrollContentBackground(.hidden)
-                                .background(ColosseumTheme.surface)
-                            }
-                        }
+                        connectionsList(for: block)
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 24)
@@ -273,6 +289,22 @@ struct BlockView: View {
             Spacer(minLength: 0)
         }
         .background(ColosseumTheme.canvas)
+    }
+
+    @ViewBuilder
+    private func notesSection(for block: Block) -> some View {
+        NotesEditor(
+            text: Binding(
+                get: { block.notes },
+                set: {
+                    block.notes = $0
+                    board.updatedAt = .now
+                }
+            ),
+            onTagTap: onTagTap
+        )
+        .frame(minHeight: 64, maxHeight: 140)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -324,10 +356,6 @@ struct BlockView: View {
 
     private func connectionsList(for block: Block) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Your connections")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(ColosseumTheme.secondaryText)
-
             ForEach(block.connections.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { conn in
                 if let parent = conn.board {
                     HStack {
@@ -354,16 +382,22 @@ struct BlockView: View {
     }
 
     private func step(_ delta: Int) {
+        guard !connections.isEmpty else { return }
         let next = index + delta
         guard next >= 0, next < connections.count else { return }
-        selectedID = connections[next].id
+        withAnimation(ColosseumMotion.standard) {
+            selectedID = connections[next].id
+        }
+        focused = true
     }
 
     private func reloadPlayer() {
-        player?.pause()
-        player = nil
+        loopingPlayer?.stop()
+        loopingPlayer = nil
         guard let block, block.kind == .video, let path = block.localRelativePath else { return }
         let url = MediaLibrary.absoluteURL(relativePath: path)
-        player = AVPlayer(url: url)
+        let next = VideoPlayback.looping(url: url, muted: false)
+        loopingPlayer = next
+        next.play()
     }
 }
