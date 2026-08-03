@@ -29,31 +29,31 @@ struct BoardOverviewView: View {
     @State private var gridFocusID: UUID?
     @State private var boardKeyMonitor = KeyNavMonitor()
     @FocusState private var boardFocused: Bool
-    /// Keyboard tag-assign sequence (T → Tab → arrows → Enter; Esc cancels).
+    /// Keyboard tag-assign: T focuses the block, popover for multi-select; Esc exits.
     @State private var isAssigningTag = false
-    /// Index into `assignableTags` while cycling; nil until Tab focuses the first tag.
-    @State private var tagAssignFocusIndex: Int?
+    @State private var tagAssignFocusIndex = 0
 
     private var isBrowsingGrid: Bool {
         selectedConnectionID == nil && arenaBrowseTarget == nil
     }
 
-    private var assignableTags: [String] {
-        TagParser.displayedTags(
-            availableTags,
-            selected: selectedTags,
-            selectionOrder: tagSelectionOrder
-        )
+    private var tagAssignConnection: Connection? {
+        guard isAssigningTag, let gridFocusID else { return nil }
+        return connections.first(where: { $0.id == gridFocusID })
+    }
+
+    private var tagAssignSelectedKeys: Set<String> {
+        guard let connection = tagAssignConnection else { return [] }
+        return TagParser.tags(for: connection)
     }
 
     private var focusedAssignTagKey: String? {
-        guard isAssigningTag, let tagAssignFocusIndex,
-              assignableTags.indices.contains(tagAssignFocusIndex)
-        else { return nil }
-        return TagParser.normalize(assignableTags[tagAssignFocusIndex])
+        guard isAssigningTag, availableTags.indices.contains(tagAssignFocusIndex) else { return nil }
+        return TagParser.normalize(availableTags[tagAssignFocusIndex])
     }
 
     private var shouldSuppressGridClicks: Bool {
+        if isAssigningTag { return true }
         if isPinching { return true }
         if let until = suppressGridClicksUntil, Date() < until { return true }
         return false
@@ -115,12 +115,12 @@ struct BoardOverviewView: View {
                         TagHeaderScroller(
                             tags: availableTags,
                             selected: $selectedTags,
-                            selectionOrder: $tagSelectionOrder,
-                            focusedTagKey: focusedAssignTagKey
+                            selectionOrder: $tagSelectionOrder
                         )
-                        .opacity(isBrowsingGrid ? 1 : 0)
-                        .allowsHitTesting(isBrowsingGrid)
+                        .opacity(isBrowsingGrid && !isAssigningTag ? 1 : 0)
+                        .allowsHitTesting(isBrowsingGrid && !isAssigningTag)
                         .animation(ColosseumMotion.overlay, value: isBrowsingGrid)
+                        .animation(ColosseumMotion.overlay, value: isAssigningTag)
                     }
                     .colosseumPlainToolbarItem()
                 }
@@ -129,7 +129,7 @@ struct BoardOverviewView: View {
                     tagMatchMode: $tagMatchMode,
                     showTagMode: !availableTags.isEmpty,
                     isImporting: isImporting,
-                    visible: isBrowsingGrid
+                    visible: isBrowsingGrid && !isAssigningTag
                 )
             }
     }
@@ -176,8 +176,8 @@ struct BoardOverviewView: View {
                 if isAssigningTag {
                     if tags.isEmpty {
                         endTagAssign()
-                    } else if let idx = tagAssignFocusIndex {
-                        tagAssignFocusIndex = min(idx, max(0, assignableTags.count - 1))
+                    } else {
+                        tagAssignFocusIndex = min(tagAssignFocusIndex, max(0, tags.count - 1))
                     }
                 }
             }
@@ -289,16 +289,12 @@ struct BoardOverviewView: View {
         }
         boardKeyMonitor.onEnter = {
             if isAssigningTag {
-                assignFocusedTag()
+                toggleFocusedAssignTag()
             } else {
                 activateFocusedConnection()
             }
         }
-        boardKeyMonitor.onTab = {
-            guard isAssigningTag else { return false }
-            DispatchQueue.main.async { focusFirstAssignTagOrAdvance() }
-            return true
-        }
+        boardKeyMonitor.onTab = { false }
         boardKeyMonitor.onEscape = {
             if isAssigningTag {
                 endTagAssign()
@@ -333,62 +329,34 @@ struct BoardOverviewView: View {
         }
         guard gridFocusID != nil else { return }
         boardFocused = true
-        isAssigningTag = true
-        tagAssignFocusIndex = nil
+        tagAssignFocusIndex = 0
+        withAnimation(ColosseumMotion.overlay) {
+            isAssigningTag = true
+        }
     }
 
     private func endTagAssign() {
-        isAssigningTag = false
-        tagAssignFocusIndex = nil
-    }
-
-    private func focusFirstAssignTagOrAdvance() {
-        guard isAssigningTag, !assignableTags.isEmpty else { return }
-        if tagAssignFocusIndex == nil {
-            withAnimation(ColosseumMotion.soft) {
-                tagAssignFocusIndex = 0
-            }
-        } else {
-            moveTagAssignFocus(delta: 1)
+        withAnimation(ColosseumMotion.overlay) {
+            isAssigningTag = false
         }
+        tagAssignFocusIndex = 0
+        boardFocused = true
     }
 
     private func moveTagAssignFocus(delta: Int) {
         guard isAssigningTag else { return }
-        let tags = assignableTags
+        let tags = availableTags
         guard !tags.isEmpty else { return }
-        // Arrows only cycle once Tab has focused the first tag.
-        guard let idx = tagAssignFocusIndex else { return }
         let count = tags.count
-        let next = ((idx + delta) % count + count) % count
+        let next = ((tagAssignFocusIndex + delta) % count + count) % count
         withAnimation(ColosseumMotion.soft) {
             tagAssignFocusIndex = next
         }
     }
 
-    private func assignFocusedTag() {
-        guard isAssigningTag,
-              let idx = tagAssignFocusIndex,
-              assignableTags.indices.contains(idx),
-              let connectionID = gridFocusID,
-              let connection = connections.first(where: { $0.id == connectionID })
-        else { return }
-
-        let tag = assignableTags[idx]
-        if let block = connection.block {
-            let next = TagParser.appendingTag(tag, to: block.notes)
-            guard next != block.notes else { return }
-            block.notes = next
-            board.updatedAt = .now
-            try? context.save()
-        } else if let nested = connection.nestedBoard {
-            let next = TagParser.appendingTag(tag, to: nested.notes)
-            guard next != nested.notes else { return }
-            nested.notes = next
-            nested.updatedAt = .now
-            board.updatedAt = .now
-            try? context.save()
-        }
+    private func toggleFocusedAssignTag() {
+        guard availableTags.indices.contains(tagAssignFocusIndex) else { return }
+        toggleAssignTag(availableTags[tagAssignFocusIndex])
     }
 
     private func moveGridFocus(delta: Int) {
@@ -496,10 +464,14 @@ struct BoardOverviewView: View {
                     .pointingHandCursor()
 
                     ForEach(filteredConnections, id: \.id) { connection in
+                        let isFocus = connection.id == gridFocusID
                         connectionCell(connection)
                             .id(connection.id)
+                            .anchorPreference(key: TagAssignAnchorKey.self, value: .bounds) {
+                                isAssigningTag && isFocus ? $0 : nil
+                            }
                             .overlay {
-                                if connection.id == gridFocusID, isBrowsingGrid {
+                                if isFocus, isBrowsingGrid, !isAssigningTag {
                                     Rectangle()
                                         .stroke(Color.white.opacity(0.85), lineWidth: 2)
                                         .allowsHitTesting(false)
@@ -510,11 +482,31 @@ struct BoardOverviewView: View {
                     }
                 }
                 .padding(28)
+                .padding(.bottom, isAssigningTag ? 200 : 0)
                 .animation(ColosseumMotion.standard, value: selectedTags)
                 .animation(ColosseumMotion.standard, value: tagMatchMode)
                 .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
                 .animation(ColosseumMotion.standard, value: columnCount)
-                .allowsHitTesting(!isPinching)
+                .allowsHitTesting(!isPinching && !isAssigningTag)
+            }
+            .blur(radius: isAssigningTag ? 5 : 0)
+            .overlay {
+                if isAssigningTag {
+                    Color.black.opacity(0.55)
+                        .ignoresSafeArea()
+                        .onTapGesture { endTagAssign() }
+                        .transition(.opacity)
+                }
+            }
+            .overlayPreferenceValue(TagAssignAnchorKey.self) { anchor in
+                GeometryReader { proxy in
+                    if isAssigningTag, let anchor, let connection = tagAssignConnection {
+                        let rect = proxy[anchor]
+                        tagAssignElevated(connection: connection, rect: rect)
+                            .transition(ColosseumMotion.overlayTransition)
+                    }
+                }
+                .allowsHitTesting(isAssigningTag)
             }
             .onChange(of: gridFocusID) { _, id in
                 guard let id, isBrowsingGrid else { return }
@@ -522,41 +514,98 @@ struct BoardOverviewView: View {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
+            .onChange(of: isAssigningTag) { _, assigning in
+                guard assigning, let id = gridFocusID else { return }
+                withAnimation(ColosseumMotion.soft) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
         }
         .highPriorityGesture(columnPinchGesture)
+        .animation(ColosseumMotion.overlay, value: isAssigningTag)
+    }
+
+    @ViewBuilder
+    private func tagAssignElevated(connection: Connection, rect: CGRect) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            connectionCellContent(connection)
+                .frame(width: rect.width, height: rect.height)
+                .clipped()
+                .overlay(
+                    Rectangle()
+                        .stroke(Color.white.opacity(0.9), lineWidth: 2)
+                )
+                .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
+
+            TagAssignPopover(
+                tags: availableTags,
+                selectedKeys: tagAssignSelectedKeys,
+                focusedKey: focusedAssignTagKey,
+                onToggle: { toggleAssignTag($0) }
+            )
+            .frame(width: max(rect.width, 160), alignment: .leading)
+        }
+        .frame(width: rect.width, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .offset(x: rect.minX, y: rect.minY)
+    }
+
+    private func toggleAssignTag(_ tag: String) {
+        guard isAssigningTag,
+              let connection = tagAssignConnection
+        else { return }
+        let key = TagParser.normalize(tag)
+        if let idx = availableTags.firstIndex(where: { TagParser.normalize($0) == key }) {
+            tagAssignFocusIndex = idx
+        }
+        applyTagToggle(tag, on: connection, currentlyOn: TagParser.tags(for: connection).contains(key))
+    }
+
+    private func applyTagToggle(_ tag: String, on connection: Connection, currentlyOn: Bool) {
+        if let block = connection.block {
+            block.notes = currentlyOn
+                ? TagParser.removingTag(tag, from: block.notes)
+                : TagParser.appendingTag(tag, to: block.notes)
+            board.updatedAt = .now
+            try? context.save()
+        } else if let nested = connection.nestedBoard {
+            nested.notes = currentlyOn
+                ? TagParser.removingTag(tag, from: nested.notes)
+                : TagParser.appendingTag(tag, to: nested.notes)
+            nested.updatedAt = .now
+            board.updatedAt = .now
+            try? context.save()
+        }
     }
 
     @ViewBuilder
     private func connectionCell(_ connection: Connection) -> some View {
+        Button {
+            guard !shouldSuppressGridClicks else { return }
+            gridFocusID = connection.id
+            openConnection(connection)
+        } label: {
+            connectionCellContent(connection)
+        }
+        .buttonStyle(.plain)
+        .contextMenu { connectionMenu(connection) }
+    }
+
+    @ViewBuilder
+    private func connectionCellContent(_ connection: Connection) -> some View {
         if let nested = connection.nestedBoard {
-            Button {
-                guard !shouldSuppressGridClicks else { return }
-                gridFocusID = connection.id
-                openConnection(connection)
-            } label: {
-                NestedBoardCell(board: nested)
-            }
-            .buttonStyle(.plain)
-            .contextMenu { connectionMenu(connection) }
+            NestedBoardCell(board: nested)
         } else if let block = connection.block {
-            Button {
-                guard !shouldSuppressGridClicks else { return }
-                gridFocusID = connection.id
-                openConnection(connection)
-            } label: {
-                switch block.kind {
-                case .image, .video:
-                    MediaBlockCell(block: block)
-                case .text:
-                    TextBlockCell(block: block)
-                case .link:
-                    LinkBlockCell(block: block)
-                case .arenaChannel:
-                    ArenaBlockCell(block: block)
-                }
+            switch block.kind {
+            case .image, .video:
+                MediaBlockCell(block: block)
+            case .text:
+                TextBlockCell(block: block)
+            case .link:
+                LinkBlockCell(block: block)
+            case .arenaChannel:
+                ArenaBlockCell(block: block)
             }
-            .buttonStyle(.plain)
-            .contextMenu { connectionMenu(connection) }
         }
     }
 
@@ -595,7 +644,7 @@ struct BoardOverviewView: View {
         MagnificationGesture()
             .onChanged { value in
                 // Only drive density while browsing the grid (not block/arena overlays).
-                guard isBrowsingGrid else { return }
+                guard isBrowsingGrid, !isAssigningTag else { return }
                 if pinchBaseColumns == nil {
                     isPinching = true
                     pinchDidChange = false

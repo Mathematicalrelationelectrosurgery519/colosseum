@@ -60,6 +60,21 @@ enum TagParser {
         return trimmed.isEmpty ? token : trimmed + " " + token
     }
 
+    /// Removes `#tag` tokens (case-insensitive) from notes.
+    static func removingTag(_ tag: String, from notes: String) -> String {
+        let key = normalize(tag)
+        guard !key.isEmpty else { return notes }
+        let escaped = NSRegularExpression.escapedPattern(for: key)
+        let pattern = try! NSRegularExpression(
+            pattern: #"(?<![\w/])#"# + escaped + #"(?![A-Za-z0-9_-])"#,
+            options: [.caseInsensitive]
+        )
+        let range = NSRange(notes.startIndex..<notes.endIndex, in: notes)
+        var result = pattern.stringByReplacingMatches(in: notes, options: [], range: range, withTemplate: "")
+        result = result.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Header order: currently selected tags (by selection order), then the rest alphabetically.
     static func displayedTags(
         _ tags: [String],
