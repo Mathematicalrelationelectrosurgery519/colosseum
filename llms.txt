@@ -1,0 +1,33 @@
+# Colosseum
+
+> Local-first macOS app for collecting images, video, links, and text into boards with blocks and connections. Private, offline, no cloud, no account, no website.
+
+Colosseum is an Are.na-inspired personal media library and mood board that runs entirely on your Mac. Built with Swift, SwiftUI, and SwiftData. Requires macOS 14+.
+
+## Links
+
+- Repository: https://github.com/paul-bokelman/colosseum
+- Latest download: https://github.com/paul-bokelman/colosseum/releases/latest
+- License: MIT (see LICENSE)
+
+## Product facts
+
+- Platforms: macOS 14+
+- Architecture: local-first; SwiftData store + Application Support media folder
+- Content types (blocks): image, video, link, text, Are.na channel preview
+- Organization: boards, nested boards, connections, notes, tags, search
+- Capture: menu bar capture for paste/URL/file; main window import
+- Interop: import public Are.na channels into local boards
+- Privacy: no telemetry, no sync, nothing leaves the machine
+
+## Source map
+
+- App entry: Sources/Colosseum/ColosseumApp.swift
+- Models: Sources/Colosseum/Models/ (Board, Block, Connection, BlockKind)
+- Services: Sources/Colosseum/Services/ (import, Are.na, media library, tags)
+- UI: Sources/Colosseum/Views/
+- Package: Package.swift
+
+## Keywords
+
+macos, swift, swiftui, swiftdata, local-first, offline-first, privacy, mood-board, media-library, personal-knowledge, arena-alternative, are.na, desktop-app
