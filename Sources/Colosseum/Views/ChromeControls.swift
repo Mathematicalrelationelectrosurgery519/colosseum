@@ -111,6 +111,39 @@ struct ColosseumLeadingToolbar: ToolbarContent {
     }
 }
 
+struct ColosseumHomeActionsToolbar: ToolbarContent {
+    var onSearch: () -> Void
+    var onImport: () -> Void
+    var onCreate: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 8) {
+                Button(action: onSearch) {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Search boards (⌘K)")
+                .pointingHandCursor()
+
+                Button(action: onImport) {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(ChromeButtonStyle())
+                .pointingHandCursor()
+
+                Button(action: onCreate) {
+                    Label("New Board", systemImage: "plus")
+                }
+                .buttonStyle(ChromeButtonStyle(emphasized: true))
+                .pointingHandCursor()
+            }
+            .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
+        }
+        .colosseumPlainToolbarItem()
+    }
+}
+
 struct ColosseumBoardHeaderToolbar: ToolbarContent {
     let title: String
     var onHome: () -> Void

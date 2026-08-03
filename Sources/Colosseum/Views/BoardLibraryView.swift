@@ -13,31 +13,7 @@ struct BoardLibraryView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                HStack(spacing: 8) {
-                    Spacer()
-                    Button(action: onSearch) {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .buttonStyle(ChromeIconButtonStyle())
-                    .help("Search boards (⌘K)")
-                    .pointingHandCursor()
-
-                    Button(action: onImportArena) {
-                        Label("Import", systemImage: "square.and.arrow.down")
-                    }
-                    .buttonStyle(ChromeButtonStyle())
-                    .pointingHandCursor()
-
-                    Button(action: onCreate) {
-                        Label("New Board", systemImage: "plus")
-                    }
-                    .buttonStyle(ChromeButtonStyle(emphasized: true))
-                    .pointingHandCursor()
-                }
-                .padding(.horizontal, 28)
-                .padding(.top, 20)
-
+            Group {
                 if boards.isEmpty {
                     emptyState
                 } else {
@@ -53,6 +29,7 @@ struct BoardLibraryView: View {
                         }
                     }
                     .padding(.horizontal, 28)
+                    .padding(.top, 20)
                     .padding(.bottom, 40)
                 }
             }
@@ -66,9 +43,10 @@ struct BoardLibraryView: View {
         .toolbar {
             if showsToolbar {
                 ColosseumLeadingToolbar(onHome: nil)
-                ColosseumColumnSliderToolbar(
-                    columnCount: .constant(ChromeMetrics.boardColumnsDefault),
-                    visible: false
+                ColosseumHomeActionsToolbar(
+                    onSearch: onSearch,
+                    onImport: onImportArena,
+                    onCreate: onCreate
                 )
             }
         }
@@ -88,10 +66,12 @@ struct BoardLibraryView: View {
                     Label("Import", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(ChromeButtonStyle())
+                .pointingHandCursor()
                 Button(action: onCreate) {
                     Label("New Board", systemImage: "plus")
                 }
                 .buttonStyle(ChromeButtonStyle(emphasized: true))
+                .pointingHandCursor()
             }
             .padding(.top, 8)
         }
