@@ -357,6 +357,7 @@ struct BlockView: View {
                 }
             ),
             placeholder: "notes...",
+            suggestionTags: TagParser.popularBoardTags(from: board),
             onTagTap: onTagTap,
             focusNonce: notesFocusNonce
         )

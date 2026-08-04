@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Plain, borderless notes field with live #tag coloring and ⌘-click to filter.
+/// Plain, borderless notes field with live #tag coloring, autocomplete, and ⌘-click to filter.
 struct NotesEditor: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String = "notes..."
+    /// Popularity-ranked board tags for `#` autocomplete.
+    var suggestionTags: [String] = []
     var onTagTap: (String) -> Void
     /// Increment to force the field to become first responder (e.g. Tab in block preview).
     var focusNonce: Int = 0
@@ -45,6 +47,7 @@ struct NotesEditor: NSViewRepresentable {
 
         scroll.documentView = textView
         context.coordinator.textView = textView
+        context.coordinator.configureSuggest(for: textView)
         return scroll
     }
 
@@ -67,6 +70,7 @@ struct NotesEditor: NSViewRepresentable {
             }
         }
         textView.needsDisplay = true
+        context.coordinator.refreshSuggestions()
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -74,9 +78,21 @@ struct NotesEditor: NSViewRepresentable {
         weak var textView: TagAwareTextView?
         private var applying = false
         var lastFocusNonce = 0
+        let suggest = TagSuggestOverlay()
+        /// Keep selection stable across filter updates when the same query family continues.
+        private var lastQuery: String?
 
         init(_ parent: NotesEditor) {
             self.parent = parent
+        }
+
+        func configureSuggest(for textView: TagAwareTextView) {
+            suggest.onSelect = { [weak self] item in
+                self?.accept(item)
+            }
+            textView.onSuggestCommand = { [weak self] command in
+                self?.handleSuggestCommand(command) ?? false
+            }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -84,6 +100,131 @@ struct NotesEditor: NSViewRepresentable {
             parent.text = textView.string
             applyHighlighting(to: textView)
             textView.needsDisplay = true
+            refreshSuggestions()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard !applying else { return }
+            refreshSuggestions()
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            suggest.hide()
+            lastQuery = nil
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            handleSuggestCommand(commandSelector)
+        }
+
+        private func handleSuggestCommand(_ commandSelector: Selector) -> Bool {
+            guard suggest.isVisible else { return false }
+            if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                suggest.moveSelection(-1)
+                return true
+            }
+            if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                suggest.moveSelection(1)
+                return true
+            }
+            if commandSelector == #selector(NSResponder.insertNewline(_:))
+                || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                suggest.acceptSelection()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                suggest.hide()
+                lastQuery = nil
+                return true
+            }
+            return false
+        }
+
+        func refreshSuggestions() {
+            guard let textView else {
+                suggest.hide()
+                return
+            }
+            guard textView.window?.firstResponder === textView else {
+                suggest.hide()
+                lastQuery = nil
+                return
+            }
+
+            let selected = textView.selectedRange()
+            guard selected.length == 0,
+                  let edit = TagParser.activeTagEdit(in: textView.string, caret: selected.location)
+            else {
+                suggest.hide()
+                lastQuery = nil
+                return
+            }
+
+            let matches = TagParser.autocomplete(
+                query: edit.query,
+                from: parent.suggestionTags,
+                limit: 3
+            )
+
+            let items: [TagSuggestOverlay.Item]
+            if matches.isEmpty {
+                // Bare `#` with no board tags yet — nothing useful to show.
+                if edit.query.isEmpty {
+                    suggest.hide()
+                    lastQuery = nil
+                    return
+                }
+                items = [.createNew]
+            } else {
+                items = matches.map { .tag($0) }
+            }
+
+            let selectedIndex: Int
+            if lastQuery == edit.query, suggest.isVisible {
+                selectedIndex = min(suggest.selectedIndex, items.count - 1)
+            } else {
+                selectedIndex = 0
+            }
+            lastQuery = edit.query
+
+            let caretRange = NSRange(location: selected.location, length: 0)
+            var rect = textView.firstRect(forCharacterRange: caretRange, actualRange: nil)
+            if rect == .zero {
+                // Fallback: bottom-left of text view in screen space.
+                let local = NSPoint(x: 0, y: textView.bounds.minY)
+                let windowPoint = textView.convert(local, to: nil)
+                rect = textView.window?.convertToScreen(NSRect(origin: windowPoint, size: .zero)) ?? .zero
+            }
+            // Prefer the lower-left of the caret glyph box.
+            let point = NSPoint(x: rect.minX, y: rect.minY)
+            suggest.update(items: items, selectedIndex: selectedIndex, screenPoint: point)
+        }
+
+        private func accept(_ item: TagSuggestOverlay.Item) {
+            guard let textView else { return }
+            let selected = textView.selectedRange()
+            guard let edit = TagParser.activeTagEdit(in: textView.string, caret: selected.location)
+            else { return }
+
+            switch item {
+            case .createNew:
+                // Typed token already in the buffer — just dismiss.
+                lastQuery = nil
+                return
+            case .tag(let tag):
+                // Trailing space ends the token so the popup doesn't reopen on the filled tag.
+                let replacement = TagParser.displayLabel(tag) + " "
+                if textView.shouldChangeText(in: edit.range, replacementString: replacement) {
+                    textView.replaceCharacters(in: edit.range, with: replacement)
+                    textView.didChangeText()
+                    let caret = edit.range.location + (replacement as NSString).length
+                    textView.setSelectedRange(NSRange(location: caret, length: 0))
+                }
+                lastQuery = nil
+                suggest.hide()
+                applyHighlighting(to: textView)
+                parent.text = textView.string
+            }
         }
 
         func applyHighlighting(to textView: NSTextView) {
@@ -133,6 +274,8 @@ final class TagAwareTextView: NSTextView {
     var onTagTap: ((String) -> Void)?
     var tagRanges: [(NSRange, String)] = []
     var placeholderString: String = "notes..."
+    /// Return true when a suggest overlay consumed the command.
+    var onSuggestCommand: ((Selector) -> Bool)?
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -146,6 +289,11 @@ final class TagAwareTextView: NSTextView {
             y: textContainerOrigin.y + textContainerInset.height
         )
         (placeholderString as NSString).draw(at: origin, withAttributes: attrs)
+    }
+
+    override func doCommand(by selector: Selector) {
+        if onSuggestCommand?(selector) == true { return }
+        super.doCommand(by: selector)
     }
 
     override func updateTrackingAreas() {

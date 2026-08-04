@@ -94,15 +94,7 @@ enum TagParser {
         var seen = Set<String>()
         var ordered: [String] = []
         for connection in board.sortedConnections {
-            let texts: [String]
-            if let block = connection.block {
-                texts = [block.notes]
-            } else if let nested = connection.nestedBoard {
-                texts = [nested.notes]
-            } else {
-                texts = []
-            }
-            for text in texts {
+            for text in noteTexts(for: connection) {
                 for tag in tags(in: text) {
                     let key = normalize(tag)
                     guard !seen.contains(key) else { continue }
@@ -114,6 +106,91 @@ enum TagParser {
         return ordered.sorted {
             $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
         }
+    }
+
+    /// Board tags ranked by usage count (desc), then alphabetically.
+    static func popularBoardTags(from board: Board) -> [String] {
+        var counts: [String: (count: Int, display: String)] = [:]
+        for connection in board.sortedConnections {
+            for text in noteTexts(for: connection) {
+                for tag in tags(in: text) {
+                    let key = normalize(tag)
+                    if let existing = counts[key] {
+                        counts[key] = (existing.count + 1, existing.display)
+                    } else {
+                        counts[key] = (1, tag)
+                    }
+                }
+            }
+        }
+        return counts.values
+            .sorted {
+                if $0.count != $1.count { return $0.count > $1.count }
+                return $0.display.localizedCaseInsensitiveCompare($1.display) == .orderedAscending
+            }
+            .map(\.display)
+    }
+
+    /// Prefix filter over a popularity-ranked list. Empty query → top `limit` tags.
+    static func autocomplete(query: String, from ranked: [String], limit: Int = 3) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return Array(ranked.prefix(limit))
+        }
+        let q = normalize(trimmed)
+        return Array(
+            ranked
+                .filter { normalize($0).hasPrefix(q) }
+                .prefix(limit)
+        )
+    }
+
+    /// Active `#tag` being typed at `caret` (UTF-16 index), or nil if not in a tag token.
+    static func activeTagEdit(in text: String, caret: Int) -> (range: NSRange, query: String)? {
+        let ns = text as NSString
+        let length = ns.length
+        guard caret >= 0, caret <= length else { return nil }
+
+        var i = caret
+        while i > 0 {
+            let scalar = ns.character(at: i - 1)
+            if isTagBodyCharacter(scalar) {
+                i -= 1
+                continue
+            }
+            if scalar == 35 { // '#'
+                if i >= 2 {
+                    let before = ns.character(at: i - 2)
+                    if isWordCharacter(before) { return nil }
+                }
+                let start = i - 1
+                let query = ns.substring(with: NSRange(location: i, length: caret - i))
+                return (NSRange(location: start, length: caret - start), query)
+            }
+            return nil
+        }
+        return nil
+    }
+
+    private static func noteTexts(for connection: Connection) -> [String] {
+        if let block = connection.block {
+            return [block.notes]
+        }
+        if let nested = connection.nestedBoard {
+            return [nested.notes]
+        }
+        return []
+    }
+
+    private static func isTagBodyCharacter(_ c: unichar) -> Bool {
+        (c >= 65 && c <= 90) // A-Z
+            || (c >= 97 && c <= 122) // a-z
+            || (c >= 48 && c <= 57) // 0-9
+            || c == 95 || c == 45 // _ -
+    }
+
+    private static func isWordCharacter(_ c: unichar) -> Bool {
+        isTagBodyCharacter(c) || c == 47 // '/'
     }
 
     static func tags(for connection: Connection) -> Set<String> {
