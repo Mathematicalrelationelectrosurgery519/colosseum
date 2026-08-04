@@ -17,4 +17,12 @@ enum ColosseumMotion {
     }
 
     static var fade: AnyTransition { .opacity }
+
+    /// Media replacing a shimmer placeholder.
+    static var mediaReveal: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.985)),
+            removal: .opacity
+        )
+    }
 }

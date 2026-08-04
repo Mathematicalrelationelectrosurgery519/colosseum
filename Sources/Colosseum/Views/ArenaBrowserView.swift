@@ -27,6 +27,7 @@ struct ArenaBrowserView: View {
     @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
+    @AppStorage("showGridNotes") private var showGridNotes = true
     @State private var pinchBaseColumns: Int?
     @State private var lastPinchStep = 0
     @State private var isPinching = false
@@ -168,6 +169,12 @@ struct ArenaBrowserView: View {
                     }
                 }
                 .keyboardShortcut("b", modifiers: [])
+                Button("") {
+                    withAnimation(ColosseumMotion.soft) {
+                        showGridNotes.toggle()
+                    }
+                }
+                .keyboardShortcut("n", modifiers: [])
                 Button("", action: handleEscape)
                     .keyboardShortcut(.cancelAction)
             }
@@ -236,11 +243,20 @@ struct ArenaBrowserView: View {
     @ViewBuilder
     private var content: some View {
         if model.isLoading && model.items.isEmpty {
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Loading channel…")
-                    .font(.callout)
-                    .foregroundStyle(ColosseumTheme.secondaryText)
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                    ForEach(0..<(columnCount * 2), id: \.self) { _ in
+                        if showGridNotes {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ShimmerBlockPlaceholder()
+                                Color.clear.frame(height: 16)
+                            }
+                        } else {
+                            ShimmerBlockPlaceholder()
+                        }
+                    }
+                }
+                .padding(28)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = model.errorMessage, model.items.isEmpty {
@@ -268,15 +284,20 @@ struct ArenaBrowserView: View {
                                 gridFocusID = item.id
                                 open(item)
                             } label: {
-                                ArenaRemoteCell(
-                                    item: item,
-                                    isHovering: hoveringItemID == item.id,
-                                    hoverPlayer: hoveringItemID == item.id ? hoverVideo : nil
-                                )
+                                GridBlockChrome(
+                                    notes: item.notes,
+                                    isSelected: item.id == gridFocusID && isBrowsingGrid,
+                                    showsNotes: showGridNotes
+                                ) {
+                                    ArenaRemoteCell(
+                                        item: item,
+                                        isHovering: hoveringItemID == item.id,
+                                        hoverPlayer: hoveringItemID == item.id ? hoverVideo : nil
+                                    )
+                                }
                             }
                             .buttonStyle(.plain)
                             .id(item.id)
-                            .gridSelectionRing(isActive: item.id == gridFocusID && isBrowsingGrid)
                             .pointingHandCursor()
                             .onHover { hovering in
                                 handleHover(item: item, hovering: hovering)
@@ -308,11 +329,17 @@ struct ArenaBrowserView: View {
                     .padding(28)
                     .animation(ColosseumMotion.standard, value: columnCount)
                     .animation(ColosseumMotion.standard, value: boardsOnlyActive.wrappedValue)
+                    .animation(ColosseumMotion.standard, value: showGridNotes)
                     .allowsHitTesting(!isPinching)
 
                     if model.isLoadingMore {
-                        ProgressView()
-                            .padding(.bottom, 28)
+                        LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                            ForEach(0..<min(columnCount, 4), id: \.self) { _ in
+                                ShimmerBlockPlaceholder()
+                            }
+                        }
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 28)
                     }
                 }
                 .onChange(of: gridFocusID) { _, id in
@@ -352,13 +379,24 @@ struct ArenaBrowserView: View {
             return copyFocusedItem()
         }
         keyMonitor.onCharacter = { char in
-            guard isBrowsingGrid, char == "b" else { return false }
-            DispatchQueue.main.async {
-                withAnimation(ColosseumMotion.soft) {
-                    boardsOnlyActive.wrappedValue.toggle()
+            guard isBrowsingGrid else { return false }
+            if char == "b" {
+                DispatchQueue.main.async {
+                    withAnimation(ColosseumMotion.soft) {
+                        boardsOnlyActive.wrappedValue.toggle()
+                    }
                 }
+                return true
             }
-            return true
+            if char == "n" {
+                DispatchQueue.main.async {
+                    withAnimation(ColosseumMotion.soft) {
+                        showGridNotes.toggle()
+                    }
+                }
+                return true
+            }
+            return false
         }
         keyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         keyMonitor.install()
@@ -413,12 +451,14 @@ struct ArenaBrowserView: View {
 
     private func push(_ target: ArenaBrowseTarget) {
         stopHover()
+        boardsOnlyActive.wrappedValue = false
         stack.append(target)
     }
 
     private func jump(to index: Int) {
         guard index >= 0, index < stack.count else { return }
         withAnimation(ColosseumMotion.soft) {
+            boardsOnlyActive.wrappedValue = false
             stack = Array(stack.prefix(index + 1))
         }
     }
@@ -430,6 +470,7 @@ struct ArenaBrowserView: View {
             return
         }
         _ = withAnimation(ColosseumMotion.soft) {
+            boardsOnlyActive.wrappedValue = false
             stack.removeLast()
         }
     }
@@ -564,19 +605,8 @@ private struct ArenaRemoteCell: View {
                 } else if item.kind == .channel {
                     channelCard
                 } else if let urlString = item.gridImageURL, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFit()
-                        case .failure:
-                            placeholder(systemName: "photo")
-                        case .empty:
-                            ProgressView().controlSize(.small)
-                        @unknown default:
-                            placeholder(systemName: "photo")
-                        }
+                    ShimmerRemoteImage(url: url, showsBorder: false) {
+                        placeholder(systemName: "photo")
                     }
                 } else if item.kind == .link {
                     placeholder(systemName: "link")
@@ -663,6 +693,8 @@ private struct ArenaRemoteItemView: View {
     @State private var remoteConnections: [ArenaRemoteConnection] = []
     @State private var isLoadingConnections = false
     @State private var connectionsError: String?
+    /// Index into `remoteConnections`; `nil` until ↑/↓ is used.
+    @State private var connectionFocusIndex: Int?
 
     private var index: Int {
         guard let selected else { return 0 }
@@ -686,6 +718,8 @@ private struct ArenaRemoteItemView: View {
             HStack(spacing: 10) {
                 ShortcutHint(text: "←")
                 ShortcutHint(text: "→")
+                ShortcutHint(text: "↑↓")
+                ShortcutHint(text: "↩")
                 ShortcutHint(text: "⌘C")
                 ShortcutHint(text: "esc")
             }
@@ -705,6 +739,7 @@ private struct ArenaRemoteItemView: View {
         .onChange(of: selected?.id) { _, _ in
             focused = true
             showMeta = false
+            connectionFocusIndex = nil
             reloadPlayer()
             Task { await loadConnections() }
         }
@@ -715,6 +750,29 @@ private struct ArenaRemoteItemView: View {
         .onKeyPress(.escape) {
             handleEscape()
             return .handled
+        }
+        .onKeyPress(.upArrow) {
+            guard !showConnect else { return .ignored }
+            moveConnectionFocus(-1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            guard !showConnect else { return .ignored }
+            moveConnectionFocus(1)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            guard !showConnect else { return .ignored }
+            activateFocusedRemoteConnection()
+            return .handled
+        }
+        .onMoveCommand { direction in
+            guard !showConnect else { return }
+            switch direction {
+            case .up: moveConnectionFocus(-1)
+            case .down: moveConnectionFocus(1)
+            default: break
+            }
         }
         .sheet(isPresented: $showConnect) {
             if let item {
@@ -731,6 +789,9 @@ private struct ArenaRemoteItemView: View {
     private func installKeyMonitor() {
         keyMonitor.onLeft = { step(-1) }
         keyMonitor.onRight = { step(1) }
+        keyMonitor.onUp = { moveConnectionFocus(-1) }
+        keyMonitor.onDown = { moveConnectionFocus(1) }
+        keyMonitor.onEnter = { activateFocusedRemoteConnection() }
         keyMonitor.onEscape = { handleEscape() }
         keyMonitor.onCopy = {
             guard let item else { return false }
@@ -738,6 +799,36 @@ private struct ArenaRemoteItemView: View {
         }
         keyMonitor.shouldIgnoreNavigation = { showConnect }
         keyMonitor.install()
+    }
+
+    private func moveConnectionFocus(_ delta: Int) {
+        guard !remoteConnections.isEmpty else { return }
+        if let current = connectionFocusIndex {
+            connectionFocusIndex = max(0, min(remoteConnections.count - 1, current + delta))
+        } else {
+            connectionFocusIndex = delta > 0 ? 0 : remoteConnections.count - 1
+        }
+        focused = true
+    }
+
+    private func activateFocusedRemoteConnection() {
+        guard let connectionFocusIndex,
+              remoteConnections.indices.contains(connectionFocusIndex)
+        else { return }
+        let connection = remoteConnections[connectionFocusIndex]
+        onBrowseBoard(ArenaBrowseTarget(
+            slug: connection.slug,
+            title: connection.title,
+            urlString: connection.arenaURLString
+        ))
+    }
+
+    private func browse(_ connection: ArenaRemoteConnection) {
+        onBrowseBoard(ArenaBrowseTarget(
+            slug: connection.slug,
+            title: connection.title,
+            urlString: connection.arenaURLString
+        ))
     }
 
     private func handleEscape() {
@@ -751,30 +842,33 @@ private struct ArenaRemoteItemView: View {
     @ViewBuilder
     private var preview: some View {
         ZStack {
-            ColosseumTheme.canvas
+            Color.black
             if let item {
                 switch item.kind {
                 case .image, .link, .attachment, .other:
-                    if item.isVideo, let loopingPlayer {
-                        PlayerView(player: loopingPlayer.player)
-                            .padding(24)
-                    } else if let urlString = item.imageURL ?? item.gridImageURL,
-                              let url = URL(string: urlString) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFit()
+                    if item.isVideo {
+                        ZStack {
+                            if let loopingPlayer {
+                                PlayerView(player: loopingPlayer.player)
                                     .padding(24)
-                            case .failure:
-                                remotePlaceholder("Couldn’t load image")
-                            case .empty:
-                                ProgressView()
-                            @unknown default:
-                                EmptyView()
+                                    .transition(ColosseumMotion.mediaReveal)
+                            } else {
+                                ShimmerBlockPlaceholder(square: false)
+                                    .padding(24)
+                                    .transition(.opacity)
                             }
                         }
+                        .animation(ColosseumMotion.standard, value: loopingPlayer != nil)
+                    } else if let urlString = item.imageURL ?? item.gridImageURL,
+                              let url = URL(string: urlString) {
+                        ShimmerRemoteImage(
+                            url: url,
+                            square: false,
+                            contentPadding: 24
+                        ) {
+                            remotePlaceholder("Couldn’t load image")
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if item.kind == .link {
                         linkPlaceholder(item)
                     } else {
@@ -904,19 +998,22 @@ private struct ArenaRemoteItemView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
         } else {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(remoteConnections) { connection in
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(remoteConnections.enumerated()), id: \.element.id) { index, connection in
+                    let isFocused = connectionFocusIndex == index
                     Button {
-                        onBrowseBoard(ArenaBrowseTarget(
-                            slug: connection.slug,
-                            title: connection.title,
-                            urlString: connection.arenaURLString
-                        ))
+                        connectionFocusIndex = index
+                        browse(connection)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(connection.title)
-                                    .foregroundStyle(ColosseumTheme.remoteBoardTitle)
+                                    .foregroundStyle(
+                                        isFocused
+                                            ? ColosseumTheme.remoteBoardTitle
+                                            : ColosseumTheme.remoteBoardTitle.opacity(0.75)
+                                    )
+                                    .fontWeight(isFocused ? .medium : .regular)
                                     .multilineTextAlignment(.leading)
                                 Text(
                                     [
@@ -931,11 +1028,15 @@ private struct ArenaRemoteItemView: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(isFocused ? Color.white.opacity(0.08) : Color.clear)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .pointingHandCursor()
+                    .animation(ColosseumMotion.soft, value: isFocused)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1110,9 +1211,13 @@ private struct ArenaRemoteItemView: View {
             let connections = try await ArenaService.fetchConnections(for: item)
             guard selected?.id == itemID else { return }
             remoteConnections = connections
+            if let connectionFocusIndex, !connections.indices.contains(connectionFocusIndex) {
+                self.connectionFocusIndex = connections.isEmpty ? nil : connections.count - 1
+            }
         } catch {
             guard selected?.id == itemID else { return }
             remoteConnections = []
+            connectionFocusIndex = nil
             connectionsError = "Couldn’t load connections"
         }
     }
