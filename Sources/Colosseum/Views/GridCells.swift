@@ -28,11 +28,16 @@ struct AddBlockCell: View {
 
 struct MediaBlockCell: View {
     let block: Block
+    var isSelected: Bool = false
 
     @State private var isHovering = false
     @State private var hoverPlayer: LoopingVideoPlayer?
 
     private var tags: [String] { TagParser.tags(in: block.notes) }
+
+    private var shouldPlayGIF: Bool {
+        block.isAnimatedImage && (isHovering || isSelected)
+    }
 
     var body: some View {
         // Size from a square surface (like AddBlockCell), never from media intrinsic size.
@@ -49,10 +54,10 @@ struct MediaBlockCell: View {
                     )
                     .allowsHitTesting(false)
                     .transition(ColosseumMotion.fade)
-                } else if block.isAnimatedImage, let path = block.localRelativePath {
-                    // Autoplay original GIF — thumbs are static JPEG frame 0.
+                } else if shouldPlayGIF, let path = block.localRelativePath {
                     AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
                         .allowsHitTesting(false)
+                        .transition(ColosseumMotion.fade)
                 } else {
                     thumbnail
                         .transition(ColosseumMotion.fade)
@@ -61,6 +66,7 @@ struct MediaBlockCell: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
             .animation(ColosseumMotion.soft, value: isHovering)
+            .animation(ColosseumMotion.soft, value: isSelected)
 
             if block.kind == .video, !isHovering {
                 Image(systemName: "play.rectangle")
@@ -74,14 +80,19 @@ struct MediaBlockCell: View {
         .clipped()
         .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : ColosseumTheme.taggedBorderWidth)
         .onHover { hovering in
-            guard block.kind == .video else { return }
-            withAnimation(ColosseumMotion.soft) {
-                isHovering = hovering
-            }
-            if hovering {
-                startHoverPlayback()
-            } else {
-                stopHoverPlayback()
+            if block.kind == .video {
+                withAnimation(ColosseumMotion.soft) {
+                    isHovering = hovering
+                }
+                if hovering {
+                    startHoverPlayback()
+                } else {
+                    stopHoverPlayback()
+                }
+            } else if block.isAnimatedImage {
+                withAnimation(ColosseumMotion.soft) {
+                    isHovering = hovering
+                }
             }
         }
         .onDisappear { stopHoverPlayback() }

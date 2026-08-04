@@ -633,7 +633,10 @@ struct BoardOverviewView: View {
 
                     ForEach(filteredConnections, id: \.id) { connection in
                         let isFocus = connection.id == gridFocusID
-                        connectionCell(connection)
+                        connectionCell(
+                            connection,
+                            isSelected: isFocus && isBrowsingGrid && !isAssigningTag
+                        )
                             .id(connection.id)
                             .anchorPreference(key: TagAssignAnchorKey.self, value: .bounds) {
                                 isAssigningTag && isFocus ? $0 : nil
@@ -690,7 +693,7 @@ struct BoardOverviewView: View {
     @ViewBuilder
     private func tagAssignElevated(connection: Connection, rect: CGRect) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            connectionCellContent(connection)
+            connectionCellContent(connection, isSelected: true)
                 .frame(width: rect.width, height: rect.height)
                 .clipped()
                 .gridSelectionRing(isActive: true)
@@ -738,26 +741,26 @@ struct BoardOverviewView: View {
     }
 
     @ViewBuilder
-    private func connectionCell(_ connection: Connection) -> some View {
+    private func connectionCell(_ connection: Connection, isSelected: Bool = false) -> some View {
         Button {
             guard !shouldSuppressGridClicks else { return }
             gridFocusID = connection.id
             openConnection(connection)
         } label: {
-            connectionCellContent(connection)
+            connectionCellContent(connection, isSelected: isSelected)
         }
         .buttonStyle(.plain)
         .contextMenu { connectionMenu(connection) }
     }
 
     @ViewBuilder
-    private func connectionCellContent(_ connection: Connection) -> some View {
+    private func connectionCellContent(_ connection: Connection, isSelected: Bool = false) -> some View {
         if let nested = connection.nestedBoard {
             NestedBoardCell(board: nested)
         } else if let block = connection.block {
             switch block.kind {
             case .image, .video:
-                MediaBlockCell(block: block)
+                MediaBlockCell(block: block, isSelected: isSelected)
             case .text:
                 TextBlockCell(block: block)
             case .link:
