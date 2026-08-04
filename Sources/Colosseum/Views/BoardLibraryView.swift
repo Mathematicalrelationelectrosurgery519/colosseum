@@ -34,6 +34,19 @@ struct BoardLibraryView: View {
         }
     }
 
+    private var filteredListIdentity: GridListIdentity<UUID> {
+        var hasher = Hasher()
+        hasher.combine(boards.count)
+        hasher.combine(showSearch)
+        hasher.combine(searchQuery)
+        if let first = boards.first { hasher.combine(first.updatedAt.timeIntervalSinceReferenceDate) }
+        if let last = boards.last { hasher.combine(last.updatedAt.timeIntervalSinceReferenceDate) }
+        return GridListIdentities.boards(
+            filteredBoards,
+            revision: UInt64(bitPattern: Int64(hasher.finalize()))
+        )
+    }
+
     /// Grid nav active (not while the search field owns typing).
     private var isBrowsingGrid: Bool { showsToolbar && !showSearch }
     /// Keep the key monitor alive during search so Esc still dismisses.
@@ -69,10 +82,11 @@ struct BoardLibraryView: View {
                     syncHomeKeyboard()
                 }
             }
-            .onChange(of: filteredBoards.map(\.id)) { _, ids in
-                if let gridFocusID, !ids.contains(gridFocusID) {
-                    self.gridFocusID = ids.first
-                }
+            .onChange(of: filteredListIdentity) { _, _ in
+                gridFocusID = GridListIdentity.revalidatedFocus(
+                    gridFocusID,
+                    in: filteredBoards.lazy.map(\.id)
+                )
             }
             .onExitCommand {
                 if showSearch {
@@ -157,7 +171,7 @@ struct BoardLibraryView: View {
                 Color.clear.preference(key: HomeGridWidthKey.self, value: geo.size.width)
             }
         )
-        .animation(ColosseumMotion.soft, value: filteredBoards.map(\.id))
+        .animation(ColosseumMotion.soft, value: filteredListIdentity)
     }
 
     private func boardCell(_ board: Board) -> some View {

@@ -98,14 +98,18 @@ struct ShimmerRemoteImage<Failure: View>: View {
     private func load() async {
         loadID += 1
         let ticket = loadID
-        image = nil
         didFail = false
 
-        let loaded = await Task.detached(priority: .userInitiated) {
-            NSImage(contentsOf: url)
-        }.value
+        if let cached = ImageThumbCache.cachedImage(for: url) {
+            image = Image(nsImage: cached)
+            return
+        }
 
-        guard ticket == loadID else { return }
+        // Only clear once we know this is a cold load (keeps scroll-back cache hits instant).
+        image = nil
+
+        let loaded = await ImageThumbCache.image(for: url)
+        guard ticket == loadID, !Task.isCancelled else { return }
         if let loaded {
             image = Image(nsImage: loaded)
         } else {

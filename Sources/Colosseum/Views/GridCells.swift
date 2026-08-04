@@ -82,10 +82,10 @@ struct MediaBlockCell: View {
         .aspectRatio(1, contentMode: .fit)
         .clipped()
         .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : ColosseumTheme.taggedBorderWidth)
-        .onAppear {
-            loadThumbnailIfNeeded()
-            syncVideoPlayback()
+        .task(id: thumbCacheKey) {
+            await loadThumbnail()
         }
+        .onAppear { syncVideoPlayback() }
         .onContinuousHover { phase in
             guard block.kind == .video || block.isAnimatedImage else { return }
             switch phase {
@@ -105,6 +105,21 @@ struct MediaBlockCell: View {
             syncVideoPlayback()
         }
         .onDisappear { videoSession.stop() }
+    }
+
+    /// Prefer disk thumb; fall back to original only for downsampled decode (never full-res).
+    private var thumbSourceURL: URL? {
+        if let path = block.thumbRelativePath {
+            return MediaLibrary.absoluteURL(relativePath: path)
+        }
+        if let path = block.localRelativePath {
+            return MediaLibrary.absoluteURL(relativePath: path)
+        }
+        return nil
+    }
+
+    private var thumbCacheKey: String {
+        thumbSourceURL?.absoluteString ?? block.id.uuidString
     }
 
     @ViewBuilder
@@ -127,11 +142,19 @@ struct MediaBlockCell: View {
             .background(ColosseumTheme.surface)
     }
 
-    private func loadThumbnailIfNeeded() {
-        guard thumbImage == nil else { return }
-        guard let path = block.thumbRelativePath ?? block.localRelativePath else { return }
-        let url = MediaLibrary.absoluteURL(relativePath: path)
-        thumbImage = NSImage(contentsOf: url)
+    @MainActor
+    private func loadThumbnail() async {
+        guard let url = thumbSourceURL else { return }
+        if let cached = ImageThumbCache.cachedImage(for: url) {
+            thumbImage = cached
+            return
+        }
+        // Keep any existing thumb visible while a cold decode runs (no flash on reuse).
+        let loaded = await ImageThumbCache.image(for: url)
+        guard !Task.isCancelled else { return }
+        if let loaded {
+            thumbImage = loaded
+        }
     }
 
     private func syncVideoPlayback() {

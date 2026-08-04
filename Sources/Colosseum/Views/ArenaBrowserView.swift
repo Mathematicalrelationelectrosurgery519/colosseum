@@ -105,6 +105,19 @@ struct ArenaBrowserView: View {
         return result
     }
 
+    /// Cheap token for focus invalidation (avoids `map(\.id)` allocations).
+    private var displayedListIdentity: GridListIdentity<Int> {
+        var hasher = Hasher()
+        hasher.combine(model.items.count)
+        hasher.combine(boardsOnlyActive.wrappedValue)
+        hasher.combine(showBoardSearch)
+        hasher.combine(boardSearchQuery)
+        return GridListIdentities.arenaItems(
+            displayedItems,
+            revision: UInt64(bitPattern: Int64(hasher.finalize()))
+        )
+    }
+
     private var columns: [GridItem] {
         let count = min(max(columnCount, ChromeMetrics.boardColumnsMin), ChromeMetrics.boardColumnsMax)
         return Array(
@@ -204,18 +217,17 @@ struct ArenaBrowserView: View {
             gridFocusID = nil
             activateFocus()
         }
-        .onChange(of: displayedItems.map(\.id)) { _, ids in
-            if let gridFocusID, !ids.contains(gridFocusID) {
-                self.gridFocusID = ids.first
-            } else if gridFocusID == nil {
-                gridFocusID = ids.first
-            }
+        .onChange(of: displayedListIdentity) { _, _ in
+            gridFocusID = GridListIdentity.revalidatedFocus(
+                gridFocusID,
+                in: displayedItems.lazy.map(\.id)
+            )
         }
         .onChange(of: boardsOnlyActive.wrappedValue) { _, _ in
-            let ids = Set(displayedItems.map(\.id))
-            if let gridFocusID, !ids.contains(gridFocusID) {
-                self.gridFocusID = displayedItems.first?.id
-            }
+            gridFocusID = GridListIdentity.revalidatedFocus(
+                gridFocusID,
+                in: displayedItems.lazy.map(\.id)
+            )
         }
         .onExitCommand(perform: handleEscape)
         .onKeyPress(.escape) {

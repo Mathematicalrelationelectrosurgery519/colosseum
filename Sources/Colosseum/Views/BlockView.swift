@@ -384,14 +384,15 @@ struct BlockView: View {
 
     @ViewBuilder
     private func notesSection(for block: Block) -> some View {
+        let suggestions = TagParser.boardTagSuggestions(from: board.sortedConnections)
         NotesEditor(
             text: Binding(
                 get: { block.notes },
                 set: { block.notes = $0 }
             ),
             placeholder: "notes...",
-            suggestionTags: TagParser.popularBoardTags(from: board),
-            suggestionCounts: TagParser.boardTagItemCounts(from: board),
+            suggestionTags: suggestions.tags,
+            suggestionCounts: suggestions.counts,
             onTagTap: onTagTap,
             focusNonce: notesFocusNonce,
             onCommit: { board.updatedAt = .now }

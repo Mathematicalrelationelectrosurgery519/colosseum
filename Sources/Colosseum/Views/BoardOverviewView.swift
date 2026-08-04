@@ -122,7 +122,7 @@ struct BoardOverviewView: View {
     }
 
     private var availableTags: [String] {
-        TagParser.boardTags(from: board)
+        TagParser.boardTags(from: connections)
     }
 
     private var filteredConnections: [Connection] {
@@ -144,6 +144,21 @@ struct BoardOverviewView: View {
             result = result.filter { connectionMatchesSearch($0, query: query) }
         }
         return result
+    }
+
+    /// Cheap token for animation / focus invalidation (avoids `map(\.id)` allocations).
+    private var filteredListIdentity: GridListIdentity<UUID> {
+        var hasher = Hasher()
+        hasher.combine(board.updatedAt.timeIntervalSinceReferenceDate)
+        hasher.combine(boardsOnly)
+        hasher.combine(tagMatchMode)
+        hasher.combine(selectedTags)
+        hasher.combine(showBoardSearch)
+        hasher.combine(boardSearchQuery)
+        return GridListIdentities.connections(
+            filteredConnections,
+            revision: UInt64(bitPattern: Int64(hasher.finalize()))
+        )
     }
 
     private func connectionMatchesSearch(_ connection: Connection, query: String) -> Bool {
@@ -272,10 +287,11 @@ struct BoardOverviewView: View {
                     boardKeyMonitor.remove()
                 }
             }
-            .onChange(of: filteredConnections.map(\.id)) { _, ids in
-                if let gridFocusID, !ids.contains(gridFocusID) {
-                    self.gridFocusID = ids.first
-                }
+            .onChange(of: filteredListIdentity) { _, _ in
+                gridFocusID = GridListIdentity.revalidatedFocus(
+                    gridFocusID,
+                    in: filteredConnections.lazy.map(\.id)
+                )
             }
             .onChange(of: availableTags) { _, tags in
                 let keys = Set(tags.map { TagParser.normalize($0) })
@@ -788,7 +804,7 @@ struct BoardOverviewView: View {
                 .animation(ColosseumMotion.standard, value: tagMatchMode)
                 .animation(ColosseumMotion.standard, value: boardsOnly)
                 .animation(ColosseumMotion.standard, value: showGridNotes)
-                .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
+                .animation(ColosseumMotion.soft, value: filteredListIdentity)
                 .animation(ColosseumMotion.standard, value: columnCount)
                 .allowsHitTesting(!isPinching && !isAssigningTag)
             }

@@ -24,7 +24,13 @@ final class Board {
     }
 
     var sortedConnections: [Connection] {
-        connections.sorted { $0.position < $1.position }
+        BoardMetricsCache.sortedConnections(
+            boardID: id,
+            updatedAt: updatedAt,
+            contentCount: connections.count
+        ) {
+            connections.sorted { $0.position < $1.position }
+        }
     }
 
     var contentCount: Int {
@@ -33,18 +39,24 @@ final class Board {
 
     /// Sum of local media bytes for blocks on this board (includes nested boards, cycle-safe).
     var storageBytes: Int64 {
-        storageBytes(visited: [])
+        BoardMetricsCache.storageBytes(
+            boardID: id,
+            updatedAt: updatedAt,
+            contentCount: connections.count
+        ) {
+            Self.computeStorageBytes(board: self, visited: [])
+        }
     }
 
-    private func storageBytes(visited: Set<UUID>) -> Int64 {
-        guard !visited.contains(id) else { return 0 }
+    private static func computeStorageBytes(board: Board, visited: Set<UUID>) -> Int64 {
+        guard !visited.contains(board.id) else { return 0 }
         var seen = visited
-        seen.insert(id)
-        return connections.reduce(into: Int64(0)) { total, connection in
+        seen.insert(board.id)
+        return board.connections.reduce(into: Int64(0)) { total, connection in
             if let block = connection.block {
                 total += max(block.byteSize, 0)
             } else if let nested = connection.nestedBoard {
-                total += nested.storageBytes(visited: seen)
+                total += computeStorageBytes(board: nested, visited: seen)
             }
         }
     }

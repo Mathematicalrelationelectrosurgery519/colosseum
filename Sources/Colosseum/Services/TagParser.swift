@@ -91,9 +91,14 @@ enum TagParser {
 
     /// Collect unique tags from board connections (block notes + nested board notes).
     static func boardTags(from board: Board) -> [String] {
+        boardTags(from: board.sortedConnections)
+    }
+
+    /// Collect unique tags from an already-sorted connection list (avoids re-sorting).
+    static func boardTags(from connections: [Connection]) -> [String] {
         var seen = Set<String>()
         var ordered: [String] = []
-        for connection in board.sortedConnections {
+        for connection in connections {
             for text in noteTexts(for: connection) {
                 for tag in tags(in: text) {
                     let key = normalize(tag)
@@ -110,8 +115,13 @@ enum TagParser {
 
     /// Normalized tag key → number of board items (connections) that include the tag.
     static func boardTagItemCounts(from board: Board) -> [String: Int] {
+        boardTagItemCounts(from: board.sortedConnections)
+    }
+
+    /// Normalized tag key → item counts from an already-sorted connection list.
+    static func boardTagItemCounts(from connections: [Connection]) -> [String: Int] {
         var counts: [String: Int] = [:]
-        for connection in board.sortedConnections {
+        for connection in connections {
             for key in tags(for: connection) {
                 counts[key, default: 0] += 1
             }
@@ -121,9 +131,19 @@ enum TagParser {
 
     /// Board tags ranked by item count (desc), then alphabetically.
     static func popularBoardTags(from board: Board) -> [String] {
-        let itemCounts = boardTagItemCounts(from: board)
+        popularBoardTags(from: board.sortedConnections)
+    }
+
+    /// Popularity-ranked tags from an already-sorted connection list (single sort + single scan).
+    static func popularBoardTags(from connections: [Connection]) -> [String] {
+        boardTagSuggestions(from: connections).tags
+    }
+
+    /// Ranked tags and per-tag item counts from one connection scan.
+    static func boardTagSuggestions(from connections: [Connection]) -> (tags: [String], counts: [String: Int]) {
+        let itemCounts = boardTagItemCounts(from: connections)
         var displayByKey: [String: String] = [:]
-        for connection in board.sortedConnections {
+        for connection in connections {
             for text in noteTexts(for: connection) {
                 for tag in tags(in: text) {
                     let key = normalize(tag)
@@ -133,7 +153,7 @@ enum TagParser {
                 }
             }
         }
-        return displayByKey.keys
+        let tags = displayByKey.keys
             .sorted {
                 let c0 = itemCounts[$0] ?? 0
                 let c1 = itemCounts[$1] ?? 0
@@ -143,6 +163,7 @@ enum TagParser {
                 return d0.localizedCaseInsensitiveCompare(d1) == .orderedAscending
             }
             .compactMap { displayByKey[$0] }
+        return (tags, itemCounts)
     }
 
     /// Prefix filter over a popularity-ranked list. Empty query → top `limit` tags.
