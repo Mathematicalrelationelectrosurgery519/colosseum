@@ -32,70 +32,66 @@ struct MediaBlockCell: View {
 
     @State private var isHovering = false
     @State private var hoverPlayer: LoopingVideoPlayer?
+    /// Hide AVPlayerView until frames are ready so we don't flash black over the thumb.
+    @State private var isVideoReady = false
 
     private var tags: [String] { TagParser.tags(in: block.notes) }
 
+    private var wantsPlayback: Bool { isHovering || isSelected }
+
     private var shouldPlayGIF: Bool {
-        block.isAnimatedImage && (isHovering || isSelected)
+        block.isAnimatedImage && wantsPlayback
+    }
+
+    private var shouldPlayVideo: Bool {
+        block.kind == .video && wantsPlayback
     }
 
     var body: some View {
         // Size from a square surface (like AddBlockCell), never from media intrinsic size.
+        // Keep the static thumb under live media so swaps don't flash empty/black.
         ZStack(alignment: .bottomTrailing) {
             Rectangle()
                 .fill(ColosseumTheme.surface)
 
-            Group {
-                if block.kind == .video, isHovering, let hoverPlayer {
-                    PlayerView(
-                        player: hoverPlayer.player,
-                        showsControls: false,
-                        videoGravity: .resizeAspect
-                    )
-                    .allowsHitTesting(false)
-                    .transition(ColosseumMotion.fade)
-                } else if shouldPlayGIF, let path = block.localRelativePath {
-                    AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
-                        .allowsHitTesting(false)
-                        .transition(ColosseumMotion.fade)
-                } else {
-                    thumbnail
-                        .transition(ColosseumMotion.fade)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            .animation(ColosseumMotion.soft, value: isHovering)
-            .animation(ColosseumMotion.soft, value: isSelected)
+            thumbnail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if block.kind == .video, !isHovering {
+            if shouldPlayVideo, let hoverPlayer {
+                PlayerView(
+                    player: hoverPlayer.player,
+                    showsControls: false,
+                    videoGravity: .resizeAspect
+                )
+                .opacity(isVideoReady ? 1 : 0)
+                .allowsHitTesting(false)
+            } else if shouldPlayGIF, let path = block.localRelativePath {
+                AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
+                    .allowsHitTesting(false)
+            }
+
+            if block.kind == .video, !shouldPlayVideo {
                 Image(systemName: "play.rectangle")
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(8)
-                    .transition(ColosseumMotion.fade)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .aspectRatio(1, contentMode: .fit)
         .clipped()
         .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : ColosseumTheme.taggedBorderWidth)
         .onHover { hovering in
-            if block.kind == .video {
-                withAnimation(ColosseumMotion.soft) {
-                    isHovering = hovering
-                }
-                if hovering {
-                    startHoverPlayback()
-                } else {
-                    stopHoverPlayback()
-                }
-            } else if block.isAnimatedImage {
-                withAnimation(ColosseumMotion.soft) {
-                    isHovering = hovering
-                }
-            }
+            guard block.kind == .video || block.isAnimatedImage else { return }
+            isHovering = hovering
+            syncVideoPlayback()
         }
-        .onDisappear { stopHoverPlayback() }
+        .onChange(of: isSelected) { _, _ in
+            syncVideoPlayback()
+        }
+        .onAppear { syncVideoPlayback() }
+        .onDisappear { stopVideoPlayback() }
     }
 
     @ViewBuilder
@@ -123,18 +119,35 @@ struct MediaBlockCell: View {
             .background(ColosseumTheme.surface)
     }
 
-    private func startHoverPlayback() {
-        stopHoverPlayback()
+    private func syncVideoPlayback() {
+        guard block.kind == .video else { return }
+        if shouldPlayVideo {
+            startVideoPlayback()
+        } else {
+            stopVideoPlayback()
+        }
+    }
+
+    private func startVideoPlayback() {
+        guard hoverPlayer == nil else {
+            hoverPlayer?.play()
+            return
+        }
         guard let path = block.localRelativePath else { return }
         let url = MediaLibrary.absoluteURL(relativePath: path)
         let player = VideoPlayback.looping(url: url, muted: true)
+        isVideoReady = false
+        player.onReady = {
+            isVideoReady = true
+        }
         hoverPlayer = player
         player.play()
     }
 
-    private func stopHoverPlayback() {
+    private func stopVideoPlayback() {
         hoverPlayer?.stop()
         hoverPlayer = nil
+        isVideoReady = false
     }
 }
 

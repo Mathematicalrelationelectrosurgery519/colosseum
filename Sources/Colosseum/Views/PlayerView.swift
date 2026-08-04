@@ -133,6 +133,9 @@ struct PlayerView: NSViewRepresentable {
 final class LoopingVideoPlayer {
     let player: AVQueuePlayer
     private var looper: AVPlayerLooper?
+    private var statusObservation: NSKeyValueObservation?
+    /// Fired on the main queue once the current item can present frames.
+    var onReady: (() -> Void)?
 
     init(url: URL, muted: Bool) {
         let queue = AVQueuePlayer()
@@ -140,6 +143,13 @@ final class LoopingVideoPlayer {
         let item = AVPlayerItem(url: url)
         looper = AVPlayerLooper(player: queue, templateItem: item)
         player = queue
+
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard item.status == .readyToPlay else { return }
+            DispatchQueue.main.async {
+                self?.onReady?()
+            }
+        }
     }
 
     func play() {
@@ -147,6 +157,9 @@ final class LoopingVideoPlayer {
     }
 
     func stop() {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        onReady = nil
         player.pause()
         looper?.disableLooping()
         looper = nil
@@ -154,6 +167,7 @@ final class LoopingVideoPlayer {
     }
 
     deinit {
+        statusObservation?.invalidate()
         player.pause()
         looper?.disableLooping()
     }
