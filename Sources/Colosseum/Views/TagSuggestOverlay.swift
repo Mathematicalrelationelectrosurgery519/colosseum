@@ -4,13 +4,15 @@ import SwiftUI
 /// Compact caret-anchored tag autocomplete panel (AppKit, matches TagAssignPopover chrome).
 final class TagSuggestOverlay {
     enum Item: Equatable {
+        /// Existing board tag.
         case tag(String)
-        case createNew
+        /// Typed token with no matches — shown as `#query` plus a small `new` pill.
+        case newTag(String)
 
-        var title: String {
+        var tagName: String {
             switch self {
-            case .tag(let tag): return TagParser.displayLabel(tag)
-            case .createNew: return "create new"
+            case .tag(let tag), .newTag(let tag):
+                return tag
             }
         }
     }
@@ -20,19 +22,40 @@ final class TagSuggestOverlay {
     private(set) var items: [Item] = []
     private(set) var selectedIndex = 0
     private var escapeMonitor: Any?
+    private var isAnimatingOut = false
+    private var anchorPoint: NSPoint = .zero
     var onSelect: ((Item) -> Void)?
     var onDismiss: (() -> Void)?
 
-    var isVisible: Bool { panel?.isVisible == true }
+    var isVisible: Bool {
+        guard let panel, !isAnimatingOut else { return false }
+        return panel.isVisible && panel.alphaValue > 0.01
+    }
 
     func show(items: [Item], selectedIndex: Int, screenPoint: NSPoint) {
+        if isAnimatingOut {
+            panel?.alphaValue = 0
+            panel?.orderOut(nil)
+            isAnimatingOut = false
+        }
         self.items = items
-        self.selectedIndex = min(max(0, selectedIndex), max(items.count - 1, 0))
+        self.selectedIndex = clampedSelection(selectedIndex)
+        self.anchorPoint = screenPoint
         ensurePanel()
-        table?.reload(items: items, selectedIndex: self.selectedIndex)
-        layout(at: screenPoint)
-        panel?.orderFront(nil)
+        table?.reload(items: items, selectedIndex: self.selectedIndex, animated: false)
+        let frame = frame(for: items.count, at: screenPoint)
+        guard let panel else { return }
+
+        panel.setFrame(frame, display: true)
+        panel.alphaValue = 0
+        panel.orderFront(nil)
         installEscapeMonitor()
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.10
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
     }
 
     func update(items: [Item], selectedIndex: Int, screenPoint: NSPoint) {
@@ -40,10 +63,20 @@ final class TagSuggestOverlay {
             show(items: items, selectedIndex: selectedIndex, screenPoint: screenPoint)
             return
         }
+        let countChanged = items.count != self.items.count
         self.items = items
-        self.selectedIndex = min(max(0, selectedIndex), max(items.count - 1, 0))
-        table?.reload(items: items, selectedIndex: self.selectedIndex)
-        layout(at: screenPoint)
+        self.selectedIndex = clampedSelection(selectedIndex)
+        self.anchorPoint = screenPoint
+        table?.reload(items: items, selectedIndex: self.selectedIndex, animated: countChanged)
+        let frame = frame(for: items.count, at: screenPoint)
+        guard let panel else { return }
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.10
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.allowsImplicitAnimation = true
+            panel.animator().setFrame(frame, display: true)
+        }
     }
 
     func moveSelection(_ delta: Int) {
@@ -65,9 +98,30 @@ final class TagSuggestOverlay {
 
     func hide() {
         removeEscapeMonitor()
-        panel?.orderOut(nil)
-        items = []
-        selectedIndex = 0
+        guard let panel, panel.isVisible, !isAnimatingOut else {
+            panel?.orderOut(nil)
+            panel?.alphaValue = 1
+            items = []
+            selectedIndex = 0
+            return
+        }
+        isAnimatingOut = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.08
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            self.panel?.orderOut(nil)
+            self.panel?.alphaValue = 1
+            self.isAnimatingOut = false
+            self.items = []
+            self.selectedIndex = 0
+        })
+    }
+
+    private func clampedSelection(_ index: Int) -> Int {
+        min(max(0, index), max(items.count - 1, 0))
     }
 
     private func ensurePanel() {
@@ -87,7 +141,7 @@ final class TagSuggestOverlay {
         self.table = table
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 160, height: 40),
+            contentRect: NSRect(x: 0, y: 0, width: 180, height: 40),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -98,15 +152,14 @@ final class TagSuggestOverlay {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.hidesOnDeactivate = true
+        panel.animationBehavior = .utilityWindow
         panel.collectionBehavior = [.transient, .fullScreenAuxiliary]
         panel.contentView = table
         self.panel = panel
     }
 
-    private func layout(at screenPoint: NSPoint) {
-        guard let panel, let table else { return }
-        let size = table.fittingSizeForItems(count: max(items.count, 1))
-        // screenPoint is caret baseline; place panel just below.
+    private func frame(for itemCount: Int, at screenPoint: NSPoint) -> NSRect {
+        let size = SuggestTable.fittingSize(forCount: max(itemCount, 1))
         var origin = NSPoint(
             x: screenPoint.x,
             y: screenPoint.y - size.height - 6
@@ -124,7 +177,7 @@ final class TagSuggestOverlay {
                 origin.y = screenPoint.y + 4
             }
         }
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        return NSRect(origin: origin, size: size)
     }
 
     private func installEscapeMonitor() {
@@ -161,10 +214,18 @@ private final class SuggestTable: NSView {
     private var selectedIndex = 0
     private var rowButtons: [SuggestRowButton] = []
 
-    private let rowHeight: CGFloat = 28
-    private let hPad: CGFloat = 10
-    private let vPad: CGFloat = 6
-    private let width: CGFloat = 168
+    private static let rowHeight: CGFloat = 28
+    private static let hPad: CGFloat = 10
+    private static let vPad: CGFloat = 6
+    private static let width: CGFloat = 188
+
+    static func fittingSize(forCount count: Int) -> CGSize {
+        let rows = max(count, 1)
+        return CGSize(
+            width: width,
+            height: vPad * 2 + CGFloat(rows) * rowHeight
+        )
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -173,6 +234,7 @@ private final class SuggestTable: NSView {
         layer?.borderColor = NSColor(ColosseumTheme.border).cgColor
         layer?.borderWidth = 1
         layer?.cornerRadius = 0
+        clipsToBounds = true
     }
 
     @available(*, unavailable)
@@ -180,30 +242,50 @@ private final class SuggestTable: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func fittingSizeForItems(count: Int) -> CGSize {
-        let rows = max(count, 1)
-        return CGSize(
-            width: width,
-            height: vPad * 2 + CGFloat(rows) * rowHeight
-        )
-    }
-
-    func reload(items: [TagSuggestOverlay.Item], selectedIndex: Int) {
+    func reload(items: [TagSuggestOverlay.Item], selectedIndex: Int, animated: Bool) {
         self.items = items
         self.selectedIndex = selectedIndex
-        rowButtons.forEach { $0.removeFromSuperview() }
-        rowButtons = []
 
-        for (index, item) in items.enumerated() {
-            let button = SuggestRowButton(item: item)
-            button.target = self
-            button.action = #selector(rowClicked(_:))
-            button.tag = index
-            button.isSelectedRow = index == selectedIndex
-            addSubview(button)
-            rowButtons.append(button)
+        let apply = { [weak self] in
+            guard let self else { return }
+            self.rowButtons.forEach { $0.removeFromSuperview() }
+            self.rowButtons = []
+
+            for (index, item) in items.enumerated() {
+                let button = SuggestRowButton(item: item)
+                button.target = self
+                button.action = #selector(self.rowClicked(_:))
+                button.tag = index
+                button.isSelectedRow = index == selectedIndex
+                button.alphaValue = animated ? 0 : 1
+                self.addSubview(button)
+                self.rowButtons.append(button)
+            }
+            self.needsLayout = true
+            self.layoutSubtreeIfNeeded()
+
+            if animated {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.10
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    for button in self.rowButtons {
+                        button.animator().alphaValue = 1
+                    }
+                }
+            }
         }
-        needsLayout = true
+
+        if animated, !rowButtons.isEmpty {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.06
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                for button in rowButtons {
+                    button.animator().alphaValue = 0
+                }
+            }, completionHandler: apply)
+        } else {
+            apply()
+        }
     }
 
     func setSelectedIndex(_ index: Int) {
@@ -215,15 +297,15 @@ private final class SuggestTable: NSView {
 
     override func layout() {
         super.layout()
-        var y = bounds.maxY - vPad - rowHeight
+        var y = bounds.maxY - Self.vPad - Self.rowHeight
         for button in rowButtons {
             button.frame = NSRect(
-                x: hPad,
+                x: Self.hPad,
                 y: y,
-                width: bounds.width - hPad * 2,
-                height: rowHeight
+                width: bounds.width - Self.hPad * 2,
+                height: Self.rowHeight
             )
-            y -= rowHeight
+            y -= Self.rowHeight
         }
     }
 
@@ -272,27 +354,61 @@ private final class SuggestRowButton: NSButton {
     override func draw(_ dirtyRect: NSRect) {
         if isSelectedRow {
             NSColor.white.withAlphaComponent(0.08).setFill()
-            dirtyRect.insetBy(dx: -4, dy: 1).fill()
+            bounds.insetBy(dx: -4, dy: 1).fill()
         }
 
-        let title = item.title as NSString
-        let color: NSColor
+        let tagTitle = TagParser.displayLabel(item.tagName) as NSString
+        let tagColor: NSColor
         switch item {
         case .tag(let tag):
-            color = isSelectedRow ? TagColor.nsColor(for: tag) : NSColor(ColosseumTheme.secondaryText)
-        case .createNew:
-            color = NSColor(ColosseumTheme.tertiaryText)
+            tagColor = isSelectedRow ? TagColor.nsColor(for: tag) : NSColor(ColosseumTheme.secondaryText)
+        case .newTag(let tag):
+            tagColor = isSelectedRow ? TagColor.nsColor(for: tag) : NSColor(ColosseumTheme.secondaryText)
         }
 
-        let attrs: [NSAttributedString.Key: Any] = [
+        let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: isSelectedRow ? .medium : .regular),
-            .foregroundColor: color
+            .foregroundColor: tagColor
         ]
-        let size = title.size(withAttributes: attrs)
-        let origin = CGPoint(
+        let titleSize = tagTitle.size(withAttributes: titleAttrs)
+        let titleOrigin = CGPoint(
             x: 6,
-            y: (bounds.height - size.height) / 2
+            y: (bounds.height - titleSize.height) / 2
         )
-        title.draw(at: origin, withAttributes: attrs)
+        tagTitle.draw(at: titleOrigin, withAttributes: titleAttrs)
+
+        if case .newTag = item {
+            drawNewPill(afterTitleWidth: titleSize.width + 6)
+        }
+    }
+
+    private func drawNewPill(afterTitleWidth: CGFloat) {
+        let label = "new" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: NSColor(ColosseumTheme.tertiaryText)
+        ]
+        let textSize = label.size(withAttributes: attrs)
+        let padX: CGFloat = 5
+        let padY: CGFloat = 2
+        let pillSize = CGSize(width: textSize.width + padX * 2, height: textSize.height + padY * 2)
+        let pillOrigin = CGPoint(
+            x: afterTitleWidth + 8,
+            y: (bounds.height - pillSize.height) / 2
+        )
+        let pillRect = NSRect(origin: pillOrigin, size: pillSize)
+
+        NSColor(ColosseumTheme.elevated).setFill()
+        pillRect.fill()
+        NSColor(ColosseumTheme.border).setStroke()
+        let border = NSBezierPath(rect: pillRect.insetBy(dx: 0.5, dy: 0.5))
+        border.lineWidth = 1
+        border.stroke()
+
+        let textOrigin = CGPoint(
+            x: pillRect.minX + padX,
+            y: pillRect.minY + padY - 0.5
+        )
+        label.draw(at: textOrigin, withAttributes: attrs)
     }
 }

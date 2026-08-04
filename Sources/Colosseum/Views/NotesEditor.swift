@@ -168,13 +168,13 @@ struct NotesEditor: NSViewRepresentable {
 
             let items: [TagSuggestOverlay.Item]
             if matches.isEmpty {
-                // Bare `#` with no board tags yet — nothing useful to show.
+                // Only offer "new" once the user has typed a token with no matches.
                 if edit.query.isEmpty {
                     suggest.hide()
                     lastQuery = nil
                     return
                 }
-                items = [.createNew]
+                items = [.newTag(edit.query)]
             } else {
                 items = matches.map { .tag($0) }
             }
@@ -207,11 +207,7 @@ struct NotesEditor: NSViewRepresentable {
             else { return }
 
             switch item {
-            case .createNew:
-                // Typed token already in the buffer — just dismiss.
-                lastQuery = nil
-                return
-            case .tag(let tag):
+            case .tag(let tag), .newTag(let tag):
                 // Trailing space ends the token so the popup doesn't reopen on the filled tag.
                 let replacement = TagParser.displayLabel(tag) + " "
                 if textView.shouldChangeText(in: edit.range, replacementString: replacement) {
