@@ -86,10 +86,20 @@ struct MediaBlockCell: View {
             loadThumbnailIfNeeded()
             syncVideoPlayback()
         }
-        .onHover { hovering in
+        .onContinuousHover { phase in
             guard block.kind == .video || block.isAnimatedImage else { return }
-            isHovering = hovering
-            syncVideoPlayback()
+            switch phase {
+            case .active:
+                if !isHovering {
+                    isHovering = true
+                    syncVideoPlayback()
+                }
+            case .ended:
+                if isHovering {
+                    isHovering = false
+                    syncVideoPlayback()
+                }
+            }
         }
         .onChange(of: isSelected) { _, _ in
             syncVideoPlayback()

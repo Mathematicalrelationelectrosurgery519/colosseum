@@ -24,6 +24,7 @@ struct BoardOverviewView: View {
     @State private var tagMatchMode: TagMatchMode = .intersection
     @State private var boardsOnly = false
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
+    @AppStorage("showGridNotes") private var showGridNotes = true
     @State private var pinchBaseColumns: Int?
     @State private var lastPinchStep = 0
     @State private var isPinching = false
@@ -50,16 +51,33 @@ struct BoardOverviewView: View {
     }
 
     private var pathSegments: [BoardPathSegment] {
-        path.compactMap { id in
+        let segments = path.compactMap { id -> BoardPathSegment? in
             guard let match = allBoards.first(where: { $0.id == id }) else { return nil }
-            return BoardPathSegment(id: id.uuidString, title: match.title)
+            let title = match.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return BoardPathSegment(
+                id: id.uuidString,
+                title: title.isEmpty ? "Untitled" : title
+            )
         }
+        if segments.isEmpty {
+            let title = board.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [BoardPathSegment(
+                id: board.id.uuidString,
+                title: title.isEmpty ? "Untitled" : title
+            )]
+        }
+        return segments
     }
 
     private var arenaPathSegments: [BoardPathSegment] {
         arenaStack.map {
             BoardPathSegment(id: $0.slug, title: $0.title?.isEmpty == false ? $0.title! : $0.slug)
         }
+    }
+
+    /// Local board trail + remote trail so the originating board stays visible.
+    private var arenaBreadcrumbSegments: [BoardPathSegment] {
+        pathSegments + arenaPathSegments
     }
 
     private var tagAssignConnection: Connection? {
@@ -141,11 +159,9 @@ struct BoardOverviewView: View {
             .toolbar {
                 if arenaBrowseTarget != nil {
                     ColosseumBoardHeaderToolbar(
-                        segments: arenaPathSegments.isEmpty
-                            ? [BoardPathSegment(id: "arena", title: "Are.na")]
-                            : arenaPathSegments,
+                        segments: arenaBreadcrumbSegments,
                         currentColor: ColosseumTheme.remoteBoardTitle,
-                        onSegmentTap: jumpArenaStack(to:),
+                        onSegmentTap: handleArenaBreadcrumbTap(_:),
                         shortcutHints: [
                             ShortcutHintItem(text: "⌘O", help: "Open on Are.na"),
                             ShortcutHintItem(text: "⌘D", help: "Import board"),
@@ -153,25 +169,9 @@ struct BoardOverviewView: View {
                     )
                 } else {
                     ColosseumBoardHeaderToolbar(
-                        segments: pathSegments.isEmpty
-                            ? [BoardPathSegment(id: board.id.uuidString, title: board.title)]
-                            : pathSegments,
+                        segments: pathSegments,
                         onSegmentTap: navigateToPathIndex(_:)
                     )
-                }
-                if !availableTags.isEmpty {
-                    ToolbarItem(placement: .principal) {
-                        TagHeaderScroller(
-                            tags: availableTags,
-                            selected: $selectedTags,
-                            selectionOrder: $tagSelectionOrder
-                        )
-                        .opacity(isBrowsingGrid && !isAssigningTag ? 1 : 0)
-                        .allowsHitTesting(isBrowsingGrid && !isAssigningTag)
-                        .animation(ColosseumMotion.overlay, value: isBrowsingGrid)
-                        .animation(ColosseumMotion.overlay, value: isAssigningTag)
-                    }
-                    .colosseumPlainToolbarItem()
                 }
                 ColosseumColumnSliderToolbar(
                     columnCount: $columnCount,
@@ -194,12 +194,12 @@ struct BoardOverviewView: View {
                         showRename = true
                     }
                     .keyboardShortcut("r", modifiers: .command)
-                    Button("") { setTagMatchMode(.intersection) }
-                        .keyboardShortcut("n", modifiers: [])
-                    Button("") { setTagMatchMode(.union) }
+                    Button("") { toggleTagMatchMode() }
                         .keyboardShortcut("u", modifiers: [])
                     Button("") { toggleBoardsOnly() }
                         .keyboardShortcut("b", modifiers: [])
+                    Button("") { toggleGridNotes() }
+                        .keyboardShortcut("n", modifiers: [])
                 }
                 .opacity(0)
                 .allowsHitTesting(false)
@@ -296,10 +296,10 @@ struct BoardOverviewView: View {
             }
     }
 
-    private func setTagMatchMode(_ mode: TagMatchMode) {
-        guard isBrowsingGrid, tagMatchMode != mode else { return }
+    private func toggleTagMatchMode() {
+        guard isBrowsingGrid else { return }
         withAnimation(ColosseumMotion.soft) {
-            tagMatchMode = mode
+            tagMatchMode = tagMatchMode == .intersection ? .union : .intersection
         }
     }
 
@@ -308,6 +308,13 @@ struct BoardOverviewView: View {
         guard isBrowsingGrid || arenaBrowseTarget != nil else { return }
         withAnimation(ColosseumMotion.soft) {
             boardsOnly.toggle()
+        }
+    }
+
+    private func toggleGridNotes() {
+        guard isBrowsingGrid || arenaBrowseTarget != nil else { return }
+        withAnimation(ColosseumMotion.soft) {
+            showGridNotes.toggle()
         }
     }
 
@@ -397,7 +404,16 @@ struct BoardOverviewView: View {
                 DispatchQueue.main.async { toggleBoardsOnly() }
                 return true
             }
+            if char == "n" {
+                guard isBrowsingGrid || arenaBrowseTarget != nil else { return false }
+                DispatchQueue.main.async { toggleGridNotes() }
+                return true
+            }
             guard isBrowsingGrid else { return false }
+            if char == "u" {
+                DispatchQueue.main.async { toggleTagMatchMode() }
+                return true
+            }
             if char == "t" {
                 DispatchQueue.main.async { toggleTagAssign() }
                 return true
@@ -591,10 +607,41 @@ struct BoardOverviewView: View {
         }
     }
 
+    private func openConnectedBoard(_ target: Board) {
+        withAnimation(ColosseumMotion.overlay) {
+            selectedConnectionID = nil
+            if target.id == board.id { return }
+            if let idx = path.firstIndex(of: target.id) {
+                path = Array(path.prefix(idx + 1))
+            } else {
+                path.append(target.id)
+            }
+        }
+        activateBoardFocus()
+    }
+
     private var boardStack: some View {
         ZStack {
             boardGrid
                 .background(ColosseumTheme.canvas)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if !availableTags.isEmpty {
+                        TagHeaderScroller(
+                            tags: availableTags,
+                            selected: $selectedTags,
+                            selectionOrder: $tagSelectionOrder
+                        )
+                        .frame(maxWidth: 420)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                        .padding(.bottom, 8)
+                        .opacity(isBrowsingGrid && !isAssigningTag ? 1 : 0)
+                        .allowsHitTesting(isBrowsingGrid && !isAssigningTag)
+                        .animation(ColosseumMotion.overlay, value: isBrowsingGrid)
+                        .animation(ColosseumMotion.overlay, value: isAssigningTag)
+                        .background(ColosseumTheme.canvas)
+                    }
+                }
 
             if let connection = selectedConnection, let block = connection.block, block.kind != .arenaChannel {
                 BlockView(
@@ -612,7 +659,8 @@ struct BoardOverviewView: View {
                             selectedConnectionID = nil
                             selectOnlyTag(tag)
                         }
-                    }
+                    },
+                    onOpenBoard: openConnectedBoard(_:)
                 )
                 .transition(ColosseumMotion.overlayTransition)
                 .zIndex(10)
@@ -653,7 +701,9 @@ struct BoardOverviewView: View {
                         guard !shouldSuppressGridClicks else { return }
                         showAddSheet = true
                     } label: {
-                        AddBlockCell()
+                        GridBlockChrome(notes: "", showsNotes: showGridNotes) {
+                            AddBlockCell()
+                        }
                     }
                     .buttonStyle(.plain)
                     .pointingHandCursor()
@@ -662,13 +712,10 @@ struct BoardOverviewView: View {
                         let isFocus = connection.id == gridFocusID
                         connectionCell(
                             connection,
-                            isSelected: isFocus && isBrowsingGrid && !isAssigningTag
+                            isSelected: isFocus && isBrowsingGrid && !isAssigningTag,
+                            captureTagAssignAnchor: isAssigningTag && isFocus
                         )
                             .id(connection.id)
-                            .anchorPreference(key: TagAssignAnchorKey.self, value: .bounds) {
-                                isAssigningTag && isFocus ? $0 : nil
-                            }
-                            .gridSelectionRing(isActive: isFocus && isBrowsingGrid && !isAssigningTag)
                             .pointingHandCursor()
                             .transition(ColosseumMotion.itemTransition)
                     }
@@ -678,6 +725,7 @@ struct BoardOverviewView: View {
                 .animation(ColosseumMotion.standard, value: selectedTags)
                 .animation(ColosseumMotion.standard, value: tagMatchMode)
                 .animation(ColosseumMotion.standard, value: boardsOnly)
+                .animation(ColosseumMotion.standard, value: showGridNotes)
                 .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
                 .animation(ColosseumMotion.standard, value: columnCount)
                 .allowsHitTesting(!isPinching && !isAssigningTag)
@@ -769,16 +817,33 @@ struct BoardOverviewView: View {
     }
 
     @ViewBuilder
-    private func connectionCell(_ connection: Connection, isSelected: Bool = false) -> some View {
+    private func connectionCell(
+        _ connection: Connection,
+        isSelected: Bool = false,
+        captureTagAssignAnchor: Bool = false
+    ) -> some View {
         Button {
             guard !shouldSuppressGridClicks else { return }
             gridFocusID = connection.id
             openConnection(connection)
         } label: {
-            connectionCellContent(connection, isSelected: isSelected)
+            GridBlockChrome(
+                notes: notes(for: connection),
+                isSelected: isSelected,
+                showsNotes: showGridNotes,
+                captureTagAssignAnchor: captureTagAssignAnchor
+            ) {
+                connectionCellContent(connection, isSelected: isSelected)
+            }
         }
         .buttonStyle(.plain)
         .contextMenu { connectionMenu(connection) }
+    }
+
+    private func notes(for connection: Connection) -> String {
+        if let block = connection.block { return block.notes }
+        if let nested = connection.nestedBoard { return nested.notes }
+        return ""
     }
 
     @ViewBuilder
@@ -892,8 +957,19 @@ struct BoardOverviewView: View {
     private func jumpArenaStack(to index: Int) {
         guard index >= 0, index < arenaStack.count else { return }
         withAnimation(ColosseumMotion.soft) {
+            boardsOnly = false
             arenaStack = Array(arenaStack.prefix(index + 1))
         }
+    }
+
+    private func handleArenaBreadcrumbTap(_ index: Int) {
+        let localCount = pathSegments.count
+        if index < localCount {
+            // Jump back into the originating local board trail and leave remote browse.
+            navigateToPathIndex(index)
+            return
+        }
+        jumpArenaStack(to: index - localCount)
     }
 
     private func handleEscape() {
@@ -913,6 +989,7 @@ struct BoardOverviewView: View {
         guard !slug.isEmpty || block.arenaURL != nil || block.sourceURL != nil else { return }
         let target = ArenaBrowseTarget(block: block)
         withAnimation(ColosseumMotion.overlay) {
+            boardsOnly = false
             arenaStack = [target]
             arenaBrowseTarget = target
         }

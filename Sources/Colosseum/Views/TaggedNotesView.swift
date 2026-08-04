@@ -50,8 +50,8 @@ struct TagMatchModeIcon: View {
         .buttonStyle(.plain)
         .help(
             mode == .intersection
-                ? "Intersection — items with every selected tag (N). Click for union."
-                : "Union — items with any selected tag (U). Click for intersection."
+                ? "Intersection — items with every selected tag (U to toggle union)."
+                : "Union — items with any selected tag (U to toggle intersection)."
         )
         .pointingHandCursor()
     }
@@ -110,7 +110,7 @@ struct TagHeaderScroller: View {
                     }
                     .padding(.horizontal, 4)
                 }
-                .frame(maxWidth: 520)
+                .frame(maxWidth: 420)
                 .frame(height: ChromeMetrics.controlHeight)
             }
         }
