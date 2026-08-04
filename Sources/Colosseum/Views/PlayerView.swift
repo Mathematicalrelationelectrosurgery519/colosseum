@@ -133,23 +133,22 @@ struct PlayerView: NSViewRepresentable {
 final class LoopingVideoPlayer {
     let player: AVQueuePlayer
     private var looper: AVPlayerLooper?
+    private var currentItemObservation: NSKeyValueObservation?
     private var statusObservation: NSKeyValueObservation?
-    /// Fired on the main queue once the current item can present frames.
+    private var didReportReady = false
+    /// Fired on the main queue once the playing item can present frames.
     var onReady: (() -> Void)?
 
     init(url: URL, muted: Bool) {
         let queue = AVQueuePlayer()
         queue.isMuted = muted
         let item = AVPlayerItem(url: url)
-        looper = AVPlayerLooper(player: queue, templateItem: item)
         player = queue
-
-        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            guard item.status == .readyToPlay else { return }
-            DispatchQueue.main.async {
-                self?.onReady?()
-            }
+        // Observe the item actually enqueued by the looper (not only the template).
+        currentItemObservation = queue.observe(\.currentItem, options: [.initial, .new]) { [weak self] queue, _ in
+            self?.watchStatus(of: queue.currentItem)
         }
+        looper = AVPlayerLooper(player: queue, templateItem: item)
     }
 
     func play() {
@@ -157,19 +156,67 @@ final class LoopingVideoPlayer {
     }
 
     func stop() {
+        currentItemObservation?.invalidate()
+        currentItemObservation = nil
         statusObservation?.invalidate()
         statusObservation = nil
         onReady = nil
+        didReportReady = false
         player.pause()
         looper?.disableLooping()
         looper = nil
         player.removeAllItems()
     }
 
+    private func watchStatus(of item: AVPlayerItem?) {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        guard let item else { return }
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard let self, item.status == .readyToPlay, !self.didReportReady else { return }
+            self.didReportReady = true
+            DispatchQueue.main.async {
+                self.onReady?()
+            }
+        }
+    }
+
     deinit {
+        currentItemObservation?.invalidate()
         statusObservation?.invalidate()
         player.pause()
         looper?.disableLooping()
+    }
+}
+
+/// Per-cell video session so ready-state updates reliably (escaping `@State` sets do not).
+@MainActor
+final class CellVideoSession: ObservableObject {
+    @Published private(set) var isReady = false
+    private(set) var looping: LoopingVideoPlayer?
+
+    var player: AVPlayer? { looping?.player }
+
+    func start(url: URL) {
+        if let looping {
+            looping.play()
+            return
+        }
+        isReady = false
+        let next = VideoPlayback.looping(url: url, muted: true)
+        next.onReady = { [weak self] in
+            Task { @MainActor in
+                self?.isReady = true
+            }
+        }
+        looping = next
+        next.play()
+    }
+
+    func stop() {
+        looping?.stop()
+        looping = nil
+        isReady = false
     }
 }
 
