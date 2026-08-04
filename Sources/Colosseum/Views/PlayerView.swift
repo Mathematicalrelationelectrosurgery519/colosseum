@@ -112,6 +112,9 @@ struct PlayerView: NSViewRepresentable {
         view.controlsStyle = showsControls ? .inline : .none
         view.videoGravity = videoGravity
         view.player = player
+        // Avoid the default grey letterbox flash before the first frame.
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.black.cgColor
         return view
     }
 

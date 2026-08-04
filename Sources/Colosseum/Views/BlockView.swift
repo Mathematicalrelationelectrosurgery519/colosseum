@@ -9,6 +9,7 @@ struct BlockView: View {
     @Binding var selectedID: UUID?
     var onClose: () -> Void
     var onTagTap: (String) -> Void = { _ in }
+    var onOpenBoard: (Board) -> Void = { _ in }
 
     @Environment(\.modelContext) private var context
 
@@ -17,6 +18,8 @@ struct BlockView: View {
     @State private var loopingPlayer: LoopingVideoPlayer?
     @State private var keyMonitor = KeyNavMonitor()
     @State private var notesFocusNonce = 0
+    /// Index into `boardConnections`; `nil` until ↑/↓ is used.
+    @State private var connectionFocusIndex: Int?
     @FocusState private var focused: Bool
 
     private var index: Int {
@@ -30,6 +33,16 @@ struct BlockView: View {
     }
 
     private var block: Block? { connection?.block }
+
+    private var boardConnections: [(connection: Connection, board: Board)] {
+        guard let block else { return [] }
+        return block.connections
+            .sorted(by: { $0.createdAt > $1.createdAt })
+            .compactMap { conn in
+                guard let parent = conn.board else { return nil }
+                return (conn, parent)
+            }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -48,6 +61,8 @@ struct BlockView: View {
             HStack(spacing: 10) {
                 ShortcutHint(text: "←")
                 ShortcutHint(text: "→")
+                ShortcutHint(text: "↑↓")
+                ShortcutHint(text: "↩")
                 ShortcutHint(text: "⌘C")
                 ShortcutHint(text: "tab")
                 ShortcutHint(text: "esc")
@@ -71,6 +86,7 @@ struct BlockView: View {
         .onChange(of: selectedID) { _, _ in
             focused = true
             showMeta = false
+            connectionFocusIndex = nil
             reloadPlayer()
         }
         .onChange(of: showConnect) { _, _ in
@@ -91,6 +107,21 @@ struct BlockView: View {
             step(1)
             return .handled
         }
+        .onKeyPress(.upArrow) {
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return .ignored }
+            moveConnectionFocus(-1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return .ignored }
+            moveConnectionFocus(1)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return .ignored }
+            activateFocusedBoardConnection()
+            return .handled
+        }
         .onKeyPress(.tab) {
             guard !showConnect else { return .ignored }
             notesFocusNonce += 1
@@ -102,6 +133,8 @@ struct BlockView: View {
             switch direction {
             case .left: step(-1)
             case .right: step(1)
+            case .up: moveConnectionFocus(-1)
+            case .down: moveConnectionFocus(1)
             default: break
             }
         }
@@ -122,6 +155,9 @@ struct BlockView: View {
     private func installKeyMonitor() {
         keyMonitor.onLeft = { step(-1) }
         keyMonitor.onRight = { step(1) }
+        keyMonitor.onUp = { moveConnectionFocus(-1) }
+        keyMonitor.onDown = { moveConnectionFocus(1) }
+        keyMonitor.onEnter = { activateFocusedBoardConnection() }
         keyMonitor.onTab = {
             notesFocusNonce += 1
             focused = false
@@ -147,7 +183,7 @@ struct BlockView: View {
     @ViewBuilder
     private var mediaPane: some View {
         ZStack {
-            ColosseumTheme.canvas
+            Color.black
             if let block {
                 mediaContent(for: block)
                     .id(block.id)
@@ -261,7 +297,7 @@ struct BlockView: View {
                             .foregroundStyle(ColosseumTheme.secondaryText)
                             .padding(.top, 8)
 
-                        connectionsList(for: block)
+                        connectionsList()
                     }
                     .padding(16)
                     .padding(.bottom, 24)
@@ -351,15 +387,13 @@ struct BlockView: View {
         NotesEditor(
             text: Binding(
                 get: { block.notes },
-                set: {
-                    block.notes = $0
-                    board.updatedAt = .now
-                }
+                set: { block.notes = $0 }
             ),
             placeholder: "notes...",
             suggestionTags: TagParser.popularBoardTags(from: board),
             onTagTap: onTagTap,
-            focusNonce: notesFocusNonce
+            focusNonce: notesFocusNonce,
+            onCommit: { board.updatedAt = .now }
         )
         .frame(minHeight: 72, maxHeight: 160)
         .fixedSize(horizontal: false, vertical: true)
@@ -455,31 +489,66 @@ struct BlockView: View {
         }
     }
 
-    private func connectionsList(for block: Block) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(block.connections.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { conn in
-                if let parent = conn.board {
+    private func connectionsList() -> some View {
+        let items = boardConnections
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.element.connection.id) { index, item in
+                let isFocused = connectionFocusIndex == index
+                Button {
+                    connectionFocusIndex = index
+                    onOpenBoard(item.board)
+                } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(parent.title)
-                                .foregroundStyle(ColosseumTheme.primaryText)
-                            Text("\(parent.contentCount) · \(ColosseumFormatters.relativeDate(conn.createdAt))")
+                            Text(item.board.title.isEmpty ? "Untitled" : item.board.title)
+                                .foregroundStyle(
+                                    isFocused ? ColosseumTheme.primaryText : ColosseumTheme.secondaryText
+                                )
+                                .fontWeight(isFocused ? .medium : .regular)
+                            Text("\(item.board.contentCount) · \(ColosseumFormatters.relativeDate(item.connection.createdAt))")
                                 .font(.caption)
                                 .foregroundStyle(ColosseumTheme.tertiaryText)
                         }
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(isFocused ? Color.white.opacity(0.08) : Color.clear)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+                .animation(ColosseumMotion.soft, value: isFocused)
             }
 
-            if block.connections.isEmpty {
+            if items.isEmpty {
                 Text("Not connected to any boards.")
                     .font(.caption)
                     .foregroundStyle(ColosseumTheme.tertiaryText)
+                    .padding(.top, 8)
             }
         }
         .padding(.top, 4)
+    }
+
+    private func moveConnectionFocus(_ delta: Int) {
+        let items = boardConnections
+        guard !items.isEmpty else { return }
+        if let current = connectionFocusIndex {
+            connectionFocusIndex = max(0, min(items.count - 1, current + delta))
+        } else {
+            connectionFocusIndex = delta > 0 ? 0 : items.count - 1
+        }
+        focused = true
+    }
+
+    private func activateFocusedBoardConnection() {
+        let items = boardConnections
+        guard let connectionFocusIndex,
+              items.indices.contains(connectionFocusIndex)
+        else { return }
+        onOpenBoard(items[connectionFocusIndex].board)
     }
 
     private func step(_ delta: Int) {
