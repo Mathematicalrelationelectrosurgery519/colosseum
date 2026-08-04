@@ -5,8 +5,8 @@ import SwiftUI
 
 /// Plays multi-frame images (GIF) via AppKit — SwiftUI `Image` only shows frame 0.
 ///
-/// Uses a container that reports no intrinsic size so large GIFs don't blow up
-/// LazyVGrid cells the way a bare `NSImageView` would.
+/// Always adopts the size SwiftUI proposes. A bare `NSImageView` otherwise reports
+/// the GIF's full pixel size and blows up LazyVGrid cells.
 struct AnimatedImageView: NSViewRepresentable {
     let url: URL
     var imageScaling: NSImageScaling = .scaleProportionallyUpOrDown
@@ -16,12 +16,16 @@ struct AnimatedImageView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        let container = IntrinsicSizeIgnoringView()
+        let container = ClippingContainerView()
         let imageView = NSImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
         imageView.imageScaling = imageScaling
         imageView.imageAlignment = .alignCenter
         imageView.animates = true
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        imageView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
         container.addSubview(imageView)
         NSLayoutConstraint.activate([
             imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -44,6 +48,25 @@ struct AnimatedImageView: NSViewRepresentable {
         }
     }
 
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: NSView,
+        context: Context
+    ) -> CGSize? {
+        let width = proposal.width
+        let height = proposal.height
+        switch (width, height) {
+        case let (w?, h?) where w.isFinite && h.isFinite && w > 0 && h > 0:
+            return CGSize(width: w, height: h)
+        case let (w?, nil) where w.isFinite && w > 0:
+            return CGSize(width: w, height: w)
+        case let (nil, h?) where h.isFinite && h > 0:
+            return CGSize(width: h, height: h)
+        default:
+            return .zero
+        }
+    }
+
     final class Coordinator {
         var currentURL: URL?
         weak var imageView: NSImageView?
@@ -57,8 +80,19 @@ struct AnimatedImageView: NSViewRepresentable {
     }
 }
 
-/// `NSView` that never proposes its children's intrinsic size to SwiftUI layout.
-private final class IntrinsicSizeIgnoringView: NSView {
+/// Clips AppKit drawing and never contributes an intrinsic size to SwiftUI.
+private final class ClippingContainerView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }

@@ -165,6 +165,7 @@ struct BlockView: View {
                 let url = MediaLibrary.absoluteURL(relativePath: path)
                 if block.isAnimatedImage || AnimatedImage.isAnimated(at: url) {
                     AnimatedImageView(url: url)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(24)
                 } else if let image = NSImage(contentsOf: url) {
                     Image(nsImage: image)

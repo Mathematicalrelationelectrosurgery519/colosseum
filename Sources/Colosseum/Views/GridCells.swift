@@ -35,7 +35,11 @@ struct MediaBlockCell: View {
     private var tags: [String] { TagParser.tags(in: block.notes) }
 
     var body: some View {
+        // Size from a square surface (like AddBlockCell), never from media intrinsic size.
         ZStack(alignment: .bottomTrailing) {
+            Rectangle()
+                .fill(ColosseumTheme.surface)
+
             Group {
                 if block.kind == .video, isHovering, let hoverPlayer {
                     PlayerView(
@@ -48,8 +52,6 @@ struct MediaBlockCell: View {
                 } else if block.isAnimatedImage, let path = block.localRelativePath {
                     // Autoplay original GIF — thumbs are static JPEG frame 0.
                     AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
                         .allowsHitTesting(false)
                 } else {
                     thumbnail
@@ -57,9 +59,7 @@ struct MediaBlockCell: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .aspectRatio(1, contentMode: .fit)
             .clipped()
-            .background(ColosseumTheme.surface)
             .animation(ColosseumMotion.soft, value: isHovering)
 
             if block.kind == .video, !isHovering {
@@ -70,6 +70,8 @@ struct MediaBlockCell: View {
                     .transition(ColosseumMotion.fade)
             }
         }
+        .aspectRatio(1, contentMode: .fit)
+        .clipped()
         .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : ColosseumTheme.taggedBorderWidth)
         .onHover { hovering in
             guard block.kind == .video else { return }
