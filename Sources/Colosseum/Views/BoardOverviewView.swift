@@ -103,7 +103,11 @@ struct BoardOverviewView: View {
     private var filteredConnections: [Connection] {
         var result = connections
         if boardsOnly {
-            result = result.filter { $0.nestedBoard != nil }
+            result = result.filter { connection in
+                if connection.nestedBoard != nil { return true }
+                if connection.block?.kind == .arenaChannel { return true }
+                return false
+            }
         }
         guard !selectedTags.isEmpty else { return result }
         return result.filter {

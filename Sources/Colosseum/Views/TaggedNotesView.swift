@@ -57,7 +57,7 @@ struct TagMatchModeIcon: View {
     }
 }
 
-/// Lowercase `b` toggle — show only nested / channel boards in the grid.
+/// Lowercase `b` toggle — show only nested boards and Are.na channel boards.
 struct BoardsOnlyFilterIcon: View {
     @Binding var isActive: Bool
 
@@ -76,8 +76,8 @@ struct BoardsOnlyFilterIcon: View {
         .buttonStyle(.plain)
         .help(
             isActive
-                ? "Showing boards only (B). Click to show all."
-                : "Boards only (B)"
+                ? "Showing boards only — nested + Are.na (B). Click to show all."
+                : "Boards only — nested + Are.na (B)"
         )
         .pointingHandCursor()
         .animation(ColosseumMotion.soft, value: isActive)
