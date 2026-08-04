@@ -12,6 +12,9 @@ struct ArenaBrowserView: View {
     var showsInlineChrome: Bool = true
     /// Shared with host toolbar when chrome is external; otherwise uses local state.
     var boardsOnly: Binding<Bool>? = nil
+    /// Shared with host principal search when chrome is external.
+    var searchActive: Binding<Bool>? = nil
+    var searchQuery: Binding<String>? = nil
     var onClose: () -> Void
     var onImportedBoard: ((Board) -> Void)?
 
@@ -34,8 +37,46 @@ struct ArenaBrowserView: View {
     @State private var pinchDidChange = false
     @State private var suppressGridClicksUntil: Date?
     @State private var localBoardsOnly = false
+    @State private var localSearchActive = false
+    @State private var localSearchQuery = ""
 
-    private var isBrowsingGrid: Bool { selectedItem == nil }
+    private var isBrowsingGrid: Bool { selectedItem == nil && !showBoardSearch }
+
+    private var showBoardSearch: Bool {
+        get { searchActiveBinding.wrappedValue }
+        nonmutating set { searchActiveBinding.wrappedValue = newValue }
+    }
+
+    private var boardSearchQuery: String {
+        get { searchQueryBinding.wrappedValue }
+        nonmutating set { searchQueryBinding.wrappedValue = newValue }
+    }
+
+    private var searchActiveBinding: Binding<Bool> {
+        Binding(
+            get: { searchActive?.wrappedValue ?? localSearchActive },
+            set: { newValue in
+                if let searchActive {
+                    searchActive.wrappedValue = newValue
+                } else {
+                    localSearchActive = newValue
+                }
+            }
+        )
+    }
+
+    private var searchQueryBinding: Binding<String> {
+        Binding(
+            get: { searchQuery?.wrappedValue ?? localSearchQuery },
+            set: { newValue in
+                if let searchQuery {
+                    searchQuery.wrappedValue = newValue
+                } else {
+                    localSearchQuery = newValue
+                }
+            }
+        )
+    }
 
     private var boardsOnlyActive: Binding<Bool> {
         Binding(
@@ -51,10 +92,17 @@ struct ArenaBrowserView: View {
     }
 
     private var displayedItems: [ArenaContentItem] {
+        var result = model.items
         if boardsOnlyActive.wrappedValue {
-            return model.items.filter { $0.kind == .channel }
+            result = result.filter { $0.kind == .channel }
         }
-        return model.items
+        let query = boardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if showBoardSearch, !query.isEmpty {
+            result = result.filter {
+                BoardContentSearch.matches([$0.title, $0.notes], query: query)
+            }
+        }
+        return result
     }
 
     private var columns: [GridItem] {
@@ -121,6 +169,7 @@ struct ArenaBrowserView: View {
             }
         }
         .animation(ColosseumMotion.overlay, value: selectedItem?.id)
+        .animation(ColosseumMotion.overlay, value: showBoardSearch)
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
@@ -132,8 +181,20 @@ struct ArenaBrowserView: View {
             activateFocus()
         }
         .onDisappear { keyMonitor.remove() }
-        .onChange(of: isBrowsingGrid) { _, browsing in
-            if browsing { activateFocus() } else { keyMonitor.remove() }
+        .onChange(of: selectedItem?.id) { _, id in
+            // Keep the monitor installed during header search so Esc always dismisses.
+            if id == nil {
+                activateFocus()
+            } else {
+                keyMonitor.remove()
+            }
+        }
+        .onChange(of: showBoardSearch) { _, searching in
+            if !searching, selectedItem == nil {
+                activateFocus()
+            } else if searching, selectedItem == nil {
+                installKeyMonitor()
+            }
         }
         .onChange(of: stack) { _, newStack in
             guard let last = newStack.last else { return }
@@ -187,6 +248,9 @@ struct ArenaBrowserView: View {
         .onReceive(NotificationCenter.default.publisher(for: .colosseumArenaImport)) { _ in
             Task { await importEntireBoard() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .colosseumSearch)) { _ in
+            toggleBoardSearch()
+        }
         .overlay(alignment: .bottom) {
             if let statusMessage {
                 Text(statusMessage)
@@ -203,36 +267,48 @@ struct ArenaBrowserView: View {
     }
 
     private var inlineChrome: some View {
-        HStack(alignment: .center, spacing: 0) {
-            BoardPathBreadcrumb(
-                segments: pathSegments,
-                currentColor: ColosseumTheme.remoteBoardTitle,
-                onSegmentTap: jump(to:)
-            )
+        ZStack {
+            HStack(alignment: .center, spacing: 0) {
+                BoardPathBreadcrumb(
+                    segments: pathSegments,
+                    currentColor: ColosseumTheme.remoteBoardTitle,
+                    onSegmentTap: jump(to:)
+                )
 
-            HStack(spacing: 10) {
-                ShortcutHint(text: "⌘O")
-                    .help("Open on Are.na")
-                ShortcutHint(text: "⌘D")
-                    .help("Import board")
-            }
-            .padding(.leading, 14)
+                Spacer(minLength: 12)
 
-            Spacer(minLength: 12)
-
-            if isImporting {
-                ProgressView()
-                    .controlSize(.small)
-                Text(importProgress)
-                    .font(.caption)
-                    .foregroundStyle(ColosseumTheme.secondaryText)
-            }
-
-            if isBrowsingGrid {
-                HStack(alignment: .center, spacing: 10) {
-                    BoardsOnlyFilterIcon(isActive: boardsOnlyActive)
-                    ColumnDensityControl(columnCount: $columnCount)
+                if isImporting {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(importProgress)
+                        .font(.caption)
+                        .foregroundStyle(ColosseumTheme.secondaryText)
                 }
+
+                if selectedItem == nil {
+                    HStack(alignment: .center, spacing: 10) {
+                        BoardsOnlyFilterIcon(isActive: boardsOnlyActive)
+                        ColumnDensityControl(columnCount: $columnCount)
+                    }
+                }
+            }
+
+            ColosseumCenterHeaderSlot(
+                isSearching: showBoardSearch,
+                searchQuery: searchQueryBinding,
+                placeholder: "Search…",
+                visible: false,
+                onDismissSearch: {
+                    withAnimation(ColosseumMotion.overlay) {
+                        dismissBoardSearch()
+                    }
+                }
+            ) {
+                Color.clear
+                    .frame(
+                        width: ChromeMetrics.headerCenterWidth,
+                        height: ChromeMetrics.controlHeight
+                    )
             }
         }
         .padding(.horizontal, ChromeMetrics.contentInset)
@@ -274,6 +350,13 @@ struct ArenaBrowserView: View {
             }
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if showBoardSearch,
+                  !boardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  displayedItems.isEmpty {
+            Text("no results")
+                .font(.system(size: 13))
+                .foregroundStyle(ColosseumTheme.tertiaryText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -286,6 +369,8 @@ struct ArenaBrowserView: View {
                             } label: {
                                 GridBlockChrome(
                                     notes: item.notes,
+                                    title: item.title,
+                                    searchQuery: showBoardSearch ? boardSearchQuery : "",
                                     isSelected: item.id == gridFocusID && isBrowsingGrid,
                                     showsNotes: showGridNotes
                                 ) {
@@ -370,6 +455,12 @@ struct ArenaBrowserView: View {
         keyMonitor.onDown = { moveGridFocus(delta: columnCount) }
         keyMonitor.onEnter = { activateFocusedItem() }
         keyMonitor.onEscape = {
+            if showBoardSearch {
+                withAnimation(ColosseumMotion.overlay) {
+                    dismissBoardSearch()
+                }
+                return
+            }
             // Item detail (and its Connect sheet) owns Esc while open.
             if selectedItem != nil { return }
             handleEscape()
@@ -398,8 +489,28 @@ struct ArenaBrowserView: View {
             }
             return false
         }
-        keyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
+        // Ignore arrows/enter while searching or in item detail; Esc still routes here
+        // (including when the header search field is first responder).
+        keyMonitor.shouldIgnoreNavigation = { selectedItem != nil || showBoardSearch }
         keyMonitor.install()
+    }
+
+    private func toggleBoardSearch() {
+        guard selectedItem == nil else { return }
+        withAnimation(ColosseumMotion.overlay) {
+            if showBoardSearch {
+                dismissBoardSearch()
+            } else {
+                boardSearchQuery = ""
+                showBoardSearch = true
+            }
+        }
+    }
+
+    private func dismissBoardSearch() {
+        showBoardSearch = false
+        boardSearchQuery = ""
+        activateFocus()
     }
 
     @discardableResult
@@ -476,6 +587,12 @@ struct ArenaBrowserView: View {
     }
 
     private func handleEscape() {
+        if showBoardSearch {
+            withAnimation(ColosseumMotion.overlay) {
+                dismissBoardSearch()
+            }
+            return
+        }
         if selectedItem != nil {
             withAnimation(ColosseumMotion.overlay) {
                 selectedItem = nil

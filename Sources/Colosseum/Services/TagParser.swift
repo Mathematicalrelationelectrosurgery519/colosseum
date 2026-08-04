@@ -108,27 +108,41 @@ enum TagParser {
         }
     }
 
-    /// Board tags ranked by usage count (desc), then alphabetically.
+    /// Normalized tag key → number of board items (connections) that include the tag.
+    static func boardTagItemCounts(from board: Board) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for connection in board.sortedConnections {
+            for key in tags(for: connection) {
+                counts[key, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    /// Board tags ranked by item count (desc), then alphabetically.
     static func popularBoardTags(from board: Board) -> [String] {
-        var counts: [String: (count: Int, display: String)] = [:]
+        let itemCounts = boardTagItemCounts(from: board)
+        var displayByKey: [String: String] = [:]
         for connection in board.sortedConnections {
             for text in noteTexts(for: connection) {
                 for tag in tags(in: text) {
                     let key = normalize(tag)
-                    if let existing = counts[key] {
-                        counts[key] = (existing.count + 1, existing.display)
-                    } else {
-                        counts[key] = (1, tag)
+                    if displayByKey[key] == nil {
+                        displayByKey[key] = tag
                     }
                 }
             }
         }
-        return counts.values
+        return displayByKey.keys
             .sorted {
-                if $0.count != $1.count { return $0.count > $1.count }
-                return $0.display.localizedCaseInsensitiveCompare($1.display) == .orderedAscending
+                let c0 = itemCounts[$0] ?? 0
+                let c1 = itemCounts[$1] ?? 0
+                if c0 != c1 { return c0 > c1 }
+                let d0 = displayByKey[$0] ?? $0
+                let d1 = displayByKey[$1] ?? $1
+                return d0.localizedCaseInsensitiveCompare(d1) == .orderedAscending
             }
-            .map(\.display)
+            .compactMap { displayByKey[$0] }
     }
 
     /// Prefix filter over a popularity-ranked list. Empty query → top `limit` tags.

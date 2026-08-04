@@ -46,40 +46,63 @@ enum ColoredNotesText {
 /// Single truncated notes line under a grid block.
 struct NotesPreviewLine: View {
     let text: String
+    /// When non-empty, emphasize matches instead of `#tag` coloring.
+    var highlightQuery: String = ""
 
     private var trimmed: String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
-        Text(ColoredNotesText.attributed(trimmed.isEmpty ? " " : trimmed, fontSize: 13))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .opacity(trimmed.isEmpty ? 0 : 1)
-            .accessibilityHidden(trimmed.isEmpty)
+        Group {
+            if highlightQuery.isEmpty {
+                Text(ColoredNotesText.attributed(trimmed.isEmpty ? " " : trimmed, fontSize: 13))
+            } else {
+                Text(BoardContentSearch.highlightedPreview(
+                    trimmed.isEmpty ? " " : trimmed,
+                    query: highlightQuery,
+                    fontSize: 13
+                ))
+            }
+        }
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(trimmed.isEmpty ? 0 : 1)
+        .accessibilityHidden(trimmed.isEmpty)
     }
 }
 
 /// Square cell + optional one-line notes preview.
 struct GridBlockChrome<Content: View>: View {
     let notes: String
+    var title: String = ""
+    var searchQuery: String = ""
     var isSelected: Bool = false
     var showsNotes: Bool = true
     /// When true, reports the square (not the notes line) for tag-assign elevation.
     var captureTagAssignAnchor: Bool = false
     @ViewBuilder var content: () -> Content
 
+    private var preview: (text: String, highlight: String) {
+        BoardContentSearch.gridPreviewLine(notes: notes, title: title, query: searchQuery)
+    }
+
+    private var notesVisible: Bool {
+        if showsNotes { return true }
+        return !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: showsNotes ? 8 : 0) {
+        VStack(alignment: .leading, spacing: notesVisible ? 8 : 0) {
             content()
                 .gridSelectionRing(isActive: isSelected)
                 .anchorPreference(key: TagAssignAnchorKey.self, value: .bounds) {
                     captureTagAssignAnchor ? $0 : nil
                 }
 
-            if showsNotes {
-                NotesPreviewLine(text: notes)
+            if notesVisible {
+                NotesPreviewLine(text: preview.text, highlightQuery: preview.highlight)
                     .frame(height: 16)
             }
         }

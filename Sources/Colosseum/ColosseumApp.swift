@@ -81,7 +81,7 @@ struct ColosseumApp: App {
 
                 Divider()
 
-                Button("Search Boards…") {
+                Button("Search…") {
                     NotificationCenter.default.post(name: .colosseumSearch, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)

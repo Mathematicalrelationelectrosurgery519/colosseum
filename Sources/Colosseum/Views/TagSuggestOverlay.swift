@@ -4,14 +4,14 @@ import SwiftUI
 /// Compact caret-anchored tag autocomplete panel (AppKit, matches TagAssignPopover chrome).
 final class TagSuggestOverlay {
     enum Item: Equatable {
-        /// Existing board tag.
-        case tag(String)
-        /// Typed token with no board matches — shown with a small `new` pill.
+        /// Existing board tag, with how many items currently use it.
+        case tag(String, count: Int)
+        /// Typed token not yet confirmed — shown with a small `new` pill until Enter/Space.
         case newTag(String)
 
         var tagName: String {
             switch self {
-            case .tag(let tag), .newTag(let tag):
+            case .tag(let tag, _), .newTag(let tag):
                 return tag
             }
         }
@@ -217,7 +217,7 @@ private final class SuggestTable: NSView {
     private static let rowHeight: CGFloat = 28
     private static let hPad: CGFloat = 10
     private static let vPad: CGFloat = 6
-    private static let width: CGFloat = 220
+    private static let width: CGFloat = 232
 
     static func fittingSize(forCount count: Int) -> CGSize {
         let rows = max(count, 1)
@@ -357,11 +357,14 @@ private final class SuggestRowButton: NSButton {
             bounds.insetBy(dx: -4, dy: 1).fill()
         }
 
-        let showsNewPill = {
-            if case .newTag = item { return true }
-            return false
-        }()
-        let pillReserve: CGFloat = showsNewPill ? 44 : 0
+        let pillLabel: String?
+        switch item {
+        case .tag(_, let count):
+            pillLabel = "\(count)"
+        case .newTag:
+            pillLabel = "new"
+        }
+        let pillReserve: CGFloat = pillLabel == nil ? 0 : 40
 
         let tagTitle = TagParser.displayLabel(item.tagName) as NSString
         let tagColor: NSColor = isSelectedRow
@@ -384,19 +387,19 @@ private final class SuggestRowButton: NSButton {
         )
         tagTitle.draw(with: titleRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: titleAttrs)
 
-        if showsNewPill {
-            drawNewPill()
+        if let pillLabel {
+            drawTrailingPill(pillLabel)
         }
     }
 
-    /// Always pinned to the trailing edge so it stays visible while the row is selected.
-    private func drawNewPill() {
-        let label = "new" as NSString
+    /// Count / "new" pill pinned to the trailing edge of the row.
+    private func drawTrailingPill(_ label: String) {
+        let text = label as NSString
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 9, weight: .medium),
             .foregroundColor: NSColor(ColosseumTheme.tertiaryText)
         ]
-        let textSize = label.size(withAttributes: attrs)
+        let textSize = text.size(withAttributes: attrs)
         let padX: CGFloat = 5
         let padY: CGFloat = 2
         let pillSize = CGSize(width: textSize.width + padX * 2, height: textSize.height + padY * 2)
@@ -417,6 +420,6 @@ private final class SuggestRowButton: NSButton {
             x: pillRect.minX + padX,
             y: pillRect.minY + padY - 0.5
         )
-        label.draw(at: textOrigin, withAttributes: attrs)
+        text.draw(at: textOrigin, withAttributes: attrs)
     }
 }

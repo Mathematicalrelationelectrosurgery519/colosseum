@@ -12,6 +12,8 @@ enum ChromeMetrics {
     static let pinchStepThreshold: CGFloat = 0.22
     /// Match board grid content inset so trailing toolbar controls line up.
     static let contentInset: CGFloat = 28
+    /// Centered tag strip / search field width in the window header.
+    static let headerCenterWidth: CGFloat = 400
 }
 
 /// Bordered chrome control matching the home Import button look.
@@ -99,29 +101,6 @@ struct WindowChromeStabilizer: NSViewRepresentable {
     }
 }
 
-struct ColosseumHomeShortcutHintsToolbar: ToolbarContent {
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            HStack(alignment: .center, spacing: 14) {
-                ShortcutHint(text: "⌘K")
-                    .help("Search boards")
-                ShortcutHint(text: "⌘I")
-                    .help("Import")
-                ShortcutHint(text: "⌘↩")
-                    .help("New Board")
-            }
-            .frame(height: ChromeMetrics.controlHeight, alignment: .center)
-            .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
-        }
-        .colosseumPlainToolbarItem()
-    }
-}
-
-struct ShortcutHintItem: Hashable {
-    let text: String
-    let help: String
-}
-
 /// Breadcrumb path: older segments fade; current is full opacity (and optionally tinted).
 struct BoardPathBreadcrumb: View {
     let segments: [BoardPathSegment]
@@ -163,64 +142,40 @@ struct BoardPathBreadcrumb: View {
     }
 }
 
-/// Board-only leading chrome (path + hints). App icon lives on RootView so it never shifts.
+/// Board-only leading chrome (path). App icon lives on RootView so it never shifts.
 struct ColosseumBoardHeaderToolbar: ToolbarContent {
     let segments: [BoardPathSegment]
     var currentColor: Color = ColosseumTheme.primaryText
     var onSegmentTap: (Int) -> Void
-    var shortcutHints: [ShortcutHintItem] = [
-        ShortcutHintItem(text: "⌘↩", help: "Add to board"),
-        ShortcutHintItem(text: "⌘R", help: "Rename board"),
-    ]
 
     /// Convenience for a single-title board (no nesting).
     init(
         title: String,
         currentColor: Color = ColosseumTheme.primaryText,
-        onTitleTap: @escaping () -> Void,
-        shortcutHints: [ShortcutHintItem]? = nil
+        onTitleTap: @escaping () -> Void
     ) {
         self.segments = [BoardPathSegment(id: "current", title: title)]
         self.currentColor = currentColor
         self.onSegmentTap = { _ in onTitleTap() }
-        if let shortcutHints {
-            self.shortcutHints = shortcutHints
-        }
     }
 
     init(
         segments: [BoardPathSegment],
         currentColor: Color = ColosseumTheme.primaryText,
-        onSegmentTap: @escaping (Int) -> Void,
-        shortcutHints: [ShortcutHintItem]? = nil
+        onSegmentTap: @escaping (Int) -> Void
     ) {
         self.segments = segments
         self.currentColor = currentColor
         self.onSegmentTap = onSegmentTap
-        if let shortcutHints {
-            self.shortcutHints = shortcutHints
-        }
     }
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            HStack(alignment: .center, spacing: 0) {
-                BoardPathBreadcrumb(
-                    segments: segments,
-                    currentColor: currentColor,
-                    onSegmentTap: onSegmentTap
-                )
-
-                if !shortcutHints.isEmpty {
-                    HStack(spacing: 10) {
-                        ForEach(shortcutHints, id: \.text) { hint in
-                            ShortcutHint(text: hint.text)
-                                .help(hint.help)
-                        }
-                    }
-                    .padding(.leading, 14)
-                }
-            }
+            BoardPathBreadcrumb(
+                segments: segments,
+                currentColor: currentColor,
+                onSegmentTap: onSegmentTap
+            )
             .frame(height: ChromeMetrics.controlHeight, alignment: .center)
         }
         .colosseumPlainToolbarItem()
@@ -287,6 +242,133 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }
         .colosseumPlainToolbarItem()
+    }
+}
+
+/// Compact search field for the centered header slot (home / board / remote).
+struct BoardHeaderSearchField: View {
+    @Binding var query: String
+    var placeholder: String = "Search…"
+    var onDismiss: (() -> Void)?
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ColosseumTheme.tertiaryText)
+            TextField(placeholder, text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ColosseumTheme.primaryText)
+                .focused($focused)
+                .onExitCommand {
+                    onDismiss?()
+                }
+        }
+        .frame(
+            width: ChromeMetrics.headerCenterWidth,
+            height: ChromeMetrics.controlHeight,
+            alignment: .leading
+        )
+        .onAppear {
+            DispatchQueue.main.async { focused = true }
+        }
+    }
+}
+
+/// Shared principal header slot: idle content ↔ search field (fixed width, opacity swap).
+struct ColosseumCenterHeaderToolbar<Idle: View>: ToolbarContent {
+    var isSearching: Bool
+    @Binding var searchQuery: String
+    var placeholder: String = "Search…"
+    var visible = true
+    var onDismissSearch: (() -> Void)?
+    @ViewBuilder var idle: () -> Idle
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            ColosseumCenterHeaderSlot(
+                isSearching: isSearching,
+                searchQuery: $searchQuery,
+                placeholder: placeholder,
+                visible: visible,
+                onDismissSearch: onDismissSearch,
+                idle: idle
+            )
+        }
+        .colosseumPlainToolbarItem()
+    }
+}
+
+/// Center slot content used by window toolbar and Arena inline chrome.
+struct ColosseumCenterHeaderSlot<Idle: View>: View {
+    var isSearching: Bool
+    @Binding var searchQuery: String
+    var placeholder: String = "Search…"
+    var visible = true
+    var onDismissSearch: (() -> Void)?
+    @ViewBuilder var idle: () -> Idle
+
+    var body: some View {
+        ZStack {
+            if isSearching {
+                BoardHeaderSearchField(
+                    query: $searchQuery,
+                    placeholder: placeholder,
+                    onDismiss: onDismissSearch
+                )
+                .transition(.opacity)
+            } else {
+                idle()
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: ChromeMetrics.headerCenterWidth, height: ChromeMetrics.controlHeight)
+        .opacity(visible || isSearching ? 1 : 0)
+        .allowsHitTesting(visible || isSearching)
+        .animation(ColosseumMotion.overlay, value: isSearching)
+        .animation(ColosseumMotion.overlay, value: visible)
+    }
+}
+
+/// Centered tag strip / search field in the window toolbar (same row as path + density).
+struct ColosseumTagHeaderToolbar: ToolbarContent {
+    let tags: [String]
+    @Binding var selected: Set<String>
+    @Binding var selectionOrder: [String]
+    var isSearching = false
+    @Binding var searchQuery: String
+    var visible = true
+    var onDismissSearch: (() -> Void)?
+
+    var body: some ToolbarContent {
+        ColosseumCenterHeaderToolbar(
+            isSearching: isSearching,
+            searchQuery: $searchQuery,
+            visible: visible,
+            onDismissSearch: onDismissSearch
+        ) {
+            if tags.isEmpty {
+                Color.clear
+                    .frame(
+                        width: ChromeMetrics.headerCenterWidth,
+                        height: ChromeMetrics.controlHeight
+                    )
+            } else {
+                TagHeaderScroller(
+                    tags: tags,
+                    selected: $selected,
+                    selectionOrder: $selectionOrder
+                )
+                .frame(
+                    width: ChromeMetrics.headerCenterWidth,
+                    height: ChromeMetrics.controlHeight,
+                    alignment: .center
+                )
+            }
+        }
     }
 }
 

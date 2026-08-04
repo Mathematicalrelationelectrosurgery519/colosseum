@@ -38,6 +38,8 @@ struct BoardOverviewView: View {
     @State private var tagAssignFocusIndex = 0
     /// Soft-removed connections that can be restored with undo (max 3).
     @State private var removalUndoStack: [RemovalUndoEntry] = []
+    @State private var showBoardSearch = false
+    @State private var boardSearchQuery = ""
 
     private struct RemovalUndoEntry {
         let boardID: UUID
@@ -47,6 +49,11 @@ struct BoardOverviewView: View {
     }
 
     private var isBrowsingGrid: Bool {
+        selectedConnectionID == nil && arenaBrowseTarget == nil && !showBoardSearch
+    }
+
+    /// Board owns the key monitor whenever the local grid (or its search field) is up.
+    private var ownsBoardKeyboard: Bool {
         selectedConnectionID == nil && arenaBrowseTarget == nil
     }
 
@@ -127,10 +134,26 @@ struct BoardOverviewView: View {
                 return false
             }
         }
-        guard !selectedTags.isEmpty else { return result }
-        return result.filter {
-            TagParser.matches(connection: $0, selected: selectedTags, mode: tagMatchMode)
+        if !selectedTags.isEmpty {
+            result = result.filter {
+                TagParser.matches(connection: $0, selected: selectedTags, mode: tagMatchMode)
+            }
         }
+        let query = boardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if showBoardSearch, !query.isEmpty {
+            result = result.filter { connectionMatchesSearch($0, query: query) }
+        }
+        return result
+    }
+
+    private func connectionMatchesSearch(_ connection: Connection, query: String) -> Bool {
+        if let nested = connection.nestedBoard {
+            return BoardContentSearch.matches([nested.title, nested.notes], query: query)
+        }
+        if let block = connection.block {
+            return BoardContentSearch.matches([block.title, block.notes], query: query)
+        }
+        return false
     }
 
     private var selectedConnection: Connection? {
@@ -146,6 +169,59 @@ struct BoardOverviewView: View {
 
     var body: some View {
         applyBoardInteractions(to: applyBoardChrome(to: boardStack))
+            .animation(ColosseumMotion.overlay, value: showBoardSearch)
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumSearch)) { _ in
+                toggleBoardSearch()
+            }
+            .onChange(of: showBoardSearch) { _, searching in
+                guard ownsBoardKeyboard else { return }
+                if searching {
+                    installBoardKeyMonitor()
+                } else {
+                    activateBoardFocus()
+                }
+            }
+    }
+
+    @ToolbarContentBuilder
+    private var boardToolbar: some ToolbarContent {
+        if arenaBrowseTarget != nil {
+            ColosseumBoardHeaderToolbar(
+                segments: arenaBreadcrumbSegments,
+                currentColor: ColosseumTheme.remoteBoardTitle,
+                onSegmentTap: handleArenaBreadcrumbTap(_:)
+            )
+        } else {
+            ColosseumBoardHeaderToolbar(
+                segments: pathSegments,
+                onSegmentTap: navigateToPathIndex(_:)
+            )
+        }
+        ColosseumTagHeaderToolbar(
+            tags: availableTags,
+            selected: $selectedTags,
+            selectionOrder: $tagSelectionOrder,
+            isSearching: showBoardSearch,
+            searchQuery: $boardSearchQuery,
+            visible: selectedConnectionID == nil
+                && !isAssigningTag
+                && arenaBrowseTarget == nil,
+            onDismissSearch: {
+                withAnimation(ColosseumMotion.overlay) {
+                    dismissBoardSearch()
+                }
+            }
+        )
+        ColosseumColumnSliderToolbar(
+            columnCount: $columnCount,
+            tagMatchMode: $tagMatchMode,
+            boardsOnly: $boardsOnly,
+            showTagMode: !availableTags.isEmpty && arenaBrowseTarget == nil && !showBoardSearch,
+            showBoardsFilter: true,
+            isImporting: isImporting,
+            visible: selectedConnectionID == nil && !isAssigningTag
+                && (isBrowsingGrid || showBoardSearch || arenaBrowseTarget != nil)
+        )
     }
 
     private func applyBoardChrome<V: View>(to view: V) -> some View {
@@ -156,33 +232,7 @@ struct BoardOverviewView: View {
             .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
             .toolbarBackground(.visible, for: .windowToolbar)
             .toolbarColorScheme(.dark, for: .windowToolbar)
-            .toolbar {
-                if arenaBrowseTarget != nil {
-                    ColosseumBoardHeaderToolbar(
-                        segments: arenaBreadcrumbSegments,
-                        currentColor: ColosseumTheme.remoteBoardTitle,
-                        onSegmentTap: handleArenaBreadcrumbTap(_:),
-                        shortcutHints: [
-                            ShortcutHintItem(text: "⌘O", help: "Open on Are.na"),
-                            ShortcutHintItem(text: "⌘D", help: "Import board"),
-                        ]
-                    )
-                } else {
-                    ColosseumBoardHeaderToolbar(
-                        segments: pathSegments,
-                        onSegmentTap: navigateToPathIndex(_:)
-                    )
-                }
-                ColosseumColumnSliderToolbar(
-                    columnCount: $columnCount,
-                    tagMatchMode: $tagMatchMode,
-                    boardsOnly: $boardsOnly,
-                    showTagMode: !availableTags.isEmpty && arenaBrowseTarget == nil,
-                    showBoardsFilter: true,
-                    isImporting: isImporting,
-                    visible: (isBrowsingGrid || arenaBrowseTarget != nil) && !isAssigningTag
-                )
-            }
+            .toolbar { boardToolbar }
     }
 
     private func applyBoardInteractions<V: View>(to view: V) -> some View {
@@ -214,8 +264,8 @@ struct BoardOverviewView: View {
                     finalizeOrphan(from: entry)
                 }
             }
-            .onChange(of: isBrowsingGrid) { _, browsing in
-                if browsing {
+            .onChange(of: ownsBoardKeyboard) { _, owns in
+                if owns {
                     activateBoardFocus()
                 } else {
                     endTagAssign()
@@ -374,7 +424,11 @@ struct BoardOverviewView: View {
         }
         boardKeyMonitor.onTab = { false }
         boardKeyMonitor.onEscape = {
-            if isAssigningTag {
+            if showBoardSearch {
+                withAnimation(ColosseumMotion.overlay) {
+                    dismissBoardSearch()
+                }
+            } else if isAssigningTag {
                 endTagAssign()
             } else if arenaBrowseTarget != nil {
                 // ArenaBrowserView owns Esc while remote is open.
@@ -420,8 +474,28 @@ struct BoardOverviewView: View {
             }
             return false
         }
+        // While searching, ignore arrows/enter but still route Esc (incl. from the text field).
         boardKeyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         boardKeyMonitor.install()
+    }
+
+    private func toggleBoardSearch() {
+        // Grid only — never over block preview or hosted Arena (Arena owns its search).
+        guard selectedConnectionID == nil, arenaBrowseTarget == nil, !isAssigningTag else { return }
+        withAnimation(ColosseumMotion.overlay) {
+            if showBoardSearch {
+                dismissBoardSearch()
+            } else {
+                boardSearchQuery = ""
+                showBoardSearch = true
+            }
+        }
+    }
+
+    private func dismissBoardSearch() {
+        showBoardSearch = false
+        boardSearchQuery = ""
+        activateBoardFocus()
     }
 
     @discardableResult
@@ -624,24 +698,6 @@ struct BoardOverviewView: View {
         ZStack {
             boardGrid
                 .background(ColosseumTheme.canvas)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    if !availableTags.isEmpty {
-                        TagHeaderScroller(
-                            tags: availableTags,
-                            selected: $selectedTags,
-                            selectionOrder: $tagSelectionOrder
-                        )
-                        .frame(maxWidth: 420)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
-                        .padding(.bottom, 8)
-                        .opacity(isBrowsingGrid && !isAssigningTag ? 1 : 0)
-                        .allowsHitTesting(isBrowsingGrid && !isAssigningTag)
-                        .animation(ColosseumMotion.overlay, value: isBrowsingGrid)
-                        .animation(ColosseumMotion.overlay, value: isAssigningTag)
-                        .background(ColosseumTheme.canvas)
-                    }
-                }
 
             if let connection = selectedConnection, let block = connection.block, block.kind != .arenaChannel {
                 BlockView(
@@ -673,14 +729,20 @@ struct BoardOverviewView: View {
                     destinationBoard: board,
                     showsInlineChrome: false,
                     boardsOnly: $boardsOnly,
+                    searchActive: $showBoardSearch,
+                    searchQuery: $boardSearchQuery,
                     onClose: {
                         withAnimation(ColosseumMotion.overlay) {
+                            showBoardSearch = false
+                            boardSearchQuery = ""
                             self.arenaBrowseTarget = nil
                             arenaStack = []
                         }
                     },
                     onImportedBoard: { imported in
                         withAnimation(ColosseumMotion.overlay) {
+                            showBoardSearch = false
+                            boardSearchQuery = ""
                             self.arenaBrowseTarget = nil
                             arenaStack = []
                             path.append(imported.id)
@@ -829,6 +891,8 @@ struct BoardOverviewView: View {
         } label: {
             GridBlockChrome(
                 notes: notes(for: connection),
+                title: title(for: connection),
+                searchQuery: showBoardSearch ? boardSearchQuery : "",
                 isSelected: isSelected,
                 showsNotes: showGridNotes,
                 captureTagAssignAnchor: captureTagAssignAnchor
@@ -843,6 +907,12 @@ struct BoardOverviewView: View {
     private func notes(for connection: Connection) -> String {
         if let block = connection.block { return block.notes }
         if let nested = connection.nestedBoard { return nested.notes }
+        return ""
+    }
+
+    private func title(for connection: Connection) -> String {
+        if let nested = connection.nestedBoard { return nested.title }
+        if let block = connection.block { return block.title }
         return ""
     }
 
@@ -973,6 +1043,12 @@ struct BoardOverviewView: View {
     }
 
     private func handleEscape() {
+        if showBoardSearch {
+            withAnimation(ColosseumMotion.overlay) {
+                dismissBoardSearch()
+            }
+            return
+        }
         // Block preview / Arena browser own Esc (including nested Connect sheets).
         if selectedConnectionID != nil || arenaBrowseTarget != nil { return }
         withAnimation(ColosseumMotion.overlay) {
@@ -989,6 +1065,8 @@ struct BoardOverviewView: View {
         guard !slug.isEmpty || block.arenaURL != nil || block.sourceURL != nil else { return }
         let target = ArenaBrowseTarget(block: block)
         withAnimation(ColosseumMotion.overlay) {
+            showBoardSearch = false
+            boardSearchQuery = ""
             boardsOnly = false
             arenaStack = [target]
             arenaBrowseTarget = target

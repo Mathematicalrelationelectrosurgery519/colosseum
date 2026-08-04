@@ -9,7 +9,6 @@ struct RootView: View {
     @State private var showNewBoardAlert = false
     @State private var newBoardTitle = ""
     @State private var showImportArena = false
-    @State private var showSearch = false
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
     @State private var arenaStack: [ArenaBrowseTarget] = []
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
@@ -21,18 +20,13 @@ struct RootView: View {
                 ZStack {
                     BoardLibraryView(
                         boards: boards,
-                        showsToolbar: path.isEmpty,
+                        showsToolbar: path.isEmpty && arenaBrowseTarget == nil,
                         onOpen: { openBoard($0.id) },
                         onCreate: { showNewBoardAlert = true },
-                        onImportArena: { showImportArena = true },
-                        onSearch: {
-                            withAnimation(ColosseumMotion.overlay) {
-                                showSearch = true
-                            }
-                        }
+                        onImportArena: { showImportArena = true }
                     )
                     .opacity(path.isEmpty ? 1 : 0)
-                    .allowsHitTesting(path.isEmpty)
+                    .allowsHitTesting(path.isEmpty && arenaBrowseTarget == nil)
 
                     if let boardID = path.last {
                         BoardRouteView(boardID: boardID, path: $path)
@@ -86,27 +80,8 @@ struct RootView: View {
                 .transition(ColosseumMotion.overlayTransition)
                 .zIndex(30)
             }
-
-            if showSearch {
-                BoardSearchView(
-                    boards: boards,
-                    onSelect: { board in
-                        withAnimation(ColosseumMotion.overlay) {
-                            showSearch = false
-                            path = [board.id]
-                        }
-                    },
-                    onClose: {
-                        withAnimation(ColosseumMotion.overlay) {
-                            showSearch = false
-                        }
-                    }
-                )
-                .zIndex(40)
-            }
         }
         .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
-        .animation(ColosseumMotion.overlay, value: showSearch)
         .alert("New Board", isPresented: $showNewBoardAlert) {
             TextField("Title", text: $newBoardTitle)
             Button("Create") { createBoard() }
@@ -141,11 +116,6 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumImportArena)) { _ in
             showImportArena = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumSearch)) { _ in
-            withAnimation(ColosseumMotion.overlay) {
-                showSearch.toggle()
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumGoHome)) { _ in
             withAnimation(ColosseumMotion.overlay) { path = [] }

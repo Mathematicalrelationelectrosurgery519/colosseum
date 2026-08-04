@@ -391,6 +391,7 @@ struct BlockView: View {
             ),
             placeholder: "notes...",
             suggestionTags: TagParser.popularBoardTags(from: board),
+            suggestionCounts: TagParser.boardTagItemCounts(from: board),
             onTagTap: onTagTap,
             focusNonce: notesFocusNonce,
             onCommit: { board.updatedAt = .now }

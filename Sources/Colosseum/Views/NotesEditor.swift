@@ -7,6 +7,8 @@ struct NotesEditor: NSViewRepresentable {
     var placeholder: String = "notes..."
     /// Popularity-ranked board tags for `#` autocomplete (existing tags only).
     var suggestionTags: [String] = []
+    /// Normalized tag → how many board items currently use it.
+    var suggestionCounts: [String: Int] = [:]
     var onTagTap: (String) -> Void
     /// Increment to force the field to become first responder (e.g. Tab in block preview).
     var focusNonce: Int = 0
@@ -77,11 +79,12 @@ struct NotesEditor: NSViewRepresentable {
             }
         }
 
-        if context.coordinator.cachedSuggestionTags != suggestionTags {
+        // Live parent catalogs update outside an active tag token only.
+        // Mid-token we keep a frozen session catalog so typing / debounce can't
+        // make a "new" tag look pre-existing before Enter or Space.
+        if context.coordinator.tagSessionTags == nil {
             context.coordinator.cachedSuggestionTags = suggestionTags
-            if context.coordinator.isEditing {
-                context.coordinator.refreshSuggestions()
-            }
+            context.coordinator.cachedSuggestionCounts = suggestionCounts
         }
     }
 
@@ -102,6 +105,12 @@ struct NotesEditor: NSViewRepresentable {
         var isEditing = false
         var lastFocusNonce = 0
         var cachedSuggestionTags: [String] = []
+        var cachedSuggestionCounts: [String: Int] = [:]
+        /// Frozen when a `#tag` token becomes active; cleared on Space / Enter / blur.
+        var tagSessionTags: [String]?
+        var tagSessionCounts: [String: Int]?
+        /// Once we offer "new" for this token, keep offering it until the token ends.
+        private var stickyNewForToken = false
         let suggest = TagSuggestOverlay()
         /// Keep selection stable across filter updates when the same query family continues.
         private var lastQuery: String?
@@ -111,6 +120,30 @@ struct NotesEditor: NSViewRepresentable {
         init(_ parent: NotesEditor) {
             self.parent = parent
             self.cachedSuggestionTags = parent.suggestionTags
+            self.cachedSuggestionCounts = parent.suggestionCounts
+        }
+
+        private var activeTags: [String] {
+            tagSessionTags ?? cachedSuggestionTags
+        }
+
+        private var activeCounts: [String: Int] {
+            tagSessionCounts ?? cachedSuggestionCounts
+        }
+
+        private func beginTagSessionIfNeeded() {
+            guard tagSessionTags == nil else { return }
+            tagSessionTags = parent.suggestionTags
+            tagSessionCounts = parent.suggestionCounts
+            cachedSuggestionTags = parent.suggestionTags
+            cachedSuggestionCounts = parent.suggestionCounts
+        }
+
+        private func endTagSession() {
+            tagSessionTags = nil
+            tagSessionCounts = nil
+            stickyNewForToken = false
+            lastQuery = nil
         }
 
         func configureSuggest(for textView: TagAwareTextView) {
@@ -140,7 +173,7 @@ struct NotesEditor: NSViewRepresentable {
 
         func textDidEndEditing(_ notification: Notification) {
             suggest.hide()
-            lastQuery = nil
+            endTagSession()
             isEditing = false
             flushCommit()
         }
@@ -202,7 +235,7 @@ struct NotesEditor: NSViewRepresentable {
             }
             guard textView.window?.firstResponder === textView else {
                 suggest.hide()
-                lastQuery = nil
+                endTagSession()
                 return
             }
 
@@ -210,23 +243,26 @@ struct NotesEditor: NSViewRepresentable {
             guard selected.length == 0,
                   let edit = TagParser.activeTagEdit(in: textView.string, caret: selected.location)
             else {
+                // Space / leaving the token ends the "new" offer.
                 suggest.hide()
-                lastQuery = nil
+                endTagSession()
                 return
             }
 
+            beginTagSessionIfNeeded()
+            let catalog = activeTags
+            let counts = activeCounts
+
             if edit.query.isEmpty {
-                let matches = TagParser.autocomplete(
-                    query: "",
-                    from: cachedSuggestionTags,
-                    limit: 3
-                )
+                stickyNewForToken = false
+                let matches = TagParser.autocomplete(query: "", from: catalog, limit: 3)
                 guard !matches.isEmpty else {
                     suggest.hide()
-                    lastQuery = nil
                     return
                 }
-                let items = matches.map { TagSuggestOverlay.Item.tag($0) }
+                let items = matches.map { tag -> TagSuggestOverlay.Item in
+                    .tag(tag, count: counts[TagParser.normalize(tag)] ?? 0)
+                }
                 let selectedIndex = (lastQuery == edit.query && suggest.isVisible)
                     ? min(suggest.selectedIndex, items.count - 1)
                     : 0
@@ -237,23 +273,24 @@ struct NotesEditor: NSViewRepresentable {
 
             let matches = TagParser.autocomplete(
                 query: edit.query,
-                from: cachedSuggestionTags,
+                from: catalog,
                 limit: 3
             )
             let queryKey = TagParser.normalize(edit.query)
-            let exactExists = cachedSuggestionTags.contains {
-                TagParser.normalize($0) == queryKey
+            // Use the frozen session catalog so debounced note writes can't create a
+            // false "already exists" and strip the new pill before Enter / Space.
+            if counts[queryKey] == nil {
+                stickyNewForToken = true
             }
 
-            // Keep a "new" row (with pill) for the whole typed token until accepted,
-            // even when existing tags still match as prefixes.
-            var items = matches.map { TagSuggestOverlay.Item.tag($0) }
-            if !exactExists {
+            var items = matches.map { tag -> TagSuggestOverlay.Item in
+                .tag(tag, count: counts[TagParser.normalize(tag)] ?? 0)
+            }
+            if stickyNewForToken {
                 items.append(.newTag(edit.query))
             }
             guard !items.isEmpty else {
                 suggest.hide()
-                lastQuery = nil
                 return
             }
 
@@ -310,8 +347,8 @@ struct NotesEditor: NSViewRepresentable {
                 let caret = edit.range.location + (replacement as NSString).length
                 textView.setSelectedRange(NSRange(location: caret, length: 0))
             }
-            lastQuery = nil
             suggest.hide()
+            endTagSession()
             applyHighlighting(to: textView)
             flushCommit()
         }

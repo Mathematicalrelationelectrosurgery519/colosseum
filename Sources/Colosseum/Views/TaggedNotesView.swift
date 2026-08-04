@@ -110,8 +110,10 @@ struct TagHeaderScroller: View {
                     }
                     .padding(.horizontal, 4)
                 }
-                .frame(maxWidth: 420)
-                .frame(height: ChromeMetrics.controlHeight)
+                .frame(
+                    width: ChromeMetrics.headerCenterWidth,
+                    height: ChromeMetrics.controlHeight
+                )
             }
         }
         .animation(ColosseumMotion.soft, value: selectionOrder)
