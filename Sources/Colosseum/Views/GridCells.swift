@@ -64,7 +64,7 @@ struct MediaBlockCell: View {
                     .transition(ColosseumMotion.fade)
             }
         }
-        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : 1.5)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 0.5 : ColosseumTheme.taggedBorderWidth)
         .onHover { hovering in
             guard block.kind == .video else { return }
             withAnimation(ColosseumMotion.soft) {
@@ -135,7 +135,7 @@ struct TextBlockCell: View {
                 .padding(12)
         }
         .aspectRatio(1, contentMode: .fit)
-        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : ColosseumTheme.taggedBorderWidth)
     }
 }
 
@@ -160,7 +160,7 @@ struct LinkBlockCell: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : ColosseumTheme.taggedBorderWidth)
     }
 }
 
@@ -195,7 +195,7 @@ struct ArenaBlockCell: View {
             .padding(14)
         }
         .aspectRatio(1, contentMode: .fit)
-        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : ColosseumTheme.taggedBorderWidth)
     }
 }
 
@@ -226,6 +226,6 @@ struct NestedBoardCell: View {
             .padding(14)
         }
         .aspectRatio(1, contentMode: .fit)
-        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : 1.5)
+        .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : ColosseumTheme.taggedBorderWidth)
     }
 }

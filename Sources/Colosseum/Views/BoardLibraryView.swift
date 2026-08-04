@@ -45,9 +45,15 @@ struct BoardLibraryView: View {
                                 .id(board.id)
                                 .overlay {
                                     if board.id == gridFocusID, showsToolbar {
+                                        let gap = ColosseumTheme.selectionRingGap
+                                        let lineWidth = ColosseumTheme.selectionRingWidth
+                                        let outset = gap + lineWidth / 2
+                                        // Ring the square thumb only (exclude title), with outer gap.
                                         Rectangle()
-                                            .stroke(Color.white.opacity(0.85), lineWidth: 2)
-                                            .padding(.bottom, 22)
+                                            .stroke(Color.white.opacity(0.85), lineWidth: lineWidth)
+                                            .padding(.bottom, 22 - outset)
+                                            .padding(.top, -outset)
+                                            .padding(.horizontal, -outset)
                                             .allowsHitTesting(false)
                                     }
                                 }

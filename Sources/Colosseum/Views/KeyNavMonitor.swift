@@ -124,7 +124,8 @@ final class KeyNavMonitor {
         }
     }
 
-    private static var isEditingText: Bool {
+    /// True when an AppKit text field/view has keyboard focus (caret movement should win).
+    static var isEditingText: Bool {
         guard let responder = NSApp.keyWindow?.firstResponder else { return false }
         if responder is NSTextView { return true }
         if responder is NSText { return true }

@@ -101,4 +101,21 @@ extension View {
             SegmentedTagBorder(colors: colors, lineWidth: lineWidth)
         }
     }
+
+    /// Focus ring drawn outside the cell with a gap, preserving the inner border.
+    /// Uses an overlay so layout / content position does not shift when active.
+    func gridSelectionRing(
+        isActive: Bool,
+        gap: CGFloat = ColosseumTheme.selectionRingGap,
+        lineWidth: CGFloat = ColosseumTheme.selectionRingWidth
+    ) -> some View {
+        overlay {
+            if isActive {
+                Rectangle()
+                    .stroke(Color.white.opacity(0.85), lineWidth: lineWidth)
+                    .padding(-(gap + lineWidth / 2))
+                    .allowsHitTesting(false)
+            }
+        }
+    }
 }

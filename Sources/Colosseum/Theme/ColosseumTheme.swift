@@ -13,6 +13,11 @@ enum ColosseumTheme {
     static let gridGap: CGFloat = 16
     static let cellMin: CGFloat = 180
     static let sidebarWidth: CGFloat = 320
+    /// Empty space between a cell's inner border and the focus selection ring.
+    static let selectionRingGap: CGFloat = 3
+    static let selectionRingWidth: CGFloat = 2
+    /// Tag-colored cell borders (plain / untagged stay thinner).
+    static let taggedBorderWidth: CGFloat = 3
 }
 
 /// A segment in a board / remote breadcrumb path.

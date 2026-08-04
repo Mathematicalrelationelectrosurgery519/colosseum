@@ -638,13 +638,7 @@ struct BoardOverviewView: View {
                             .anchorPreference(key: TagAssignAnchorKey.self, value: .bounds) {
                                 isAssigningTag && isFocus ? $0 : nil
                             }
-                            .overlay {
-                                if isFocus, isBrowsingGrid, !isAssigningTag {
-                                    Rectangle()
-                                        .stroke(Color.white.opacity(0.85), lineWidth: 2)
-                                        .allowsHitTesting(false)
-                                }
-                            }
+                            .gridSelectionRing(isActive: isFocus && isBrowsingGrid && !isAssigningTag)
                             .pointingHandCursor()
                             .transition(ColosseumMotion.itemTransition)
                     }
@@ -699,10 +693,7 @@ struct BoardOverviewView: View {
             connectionCellContent(connection)
                 .frame(width: rect.width, height: rect.height)
                 .clipped()
-                .overlay(
-                    Rectangle()
-                        .stroke(Color.white.opacity(0.9), lineWidth: 2)
-                )
+                .gridSelectionRing(isActive: true)
                 .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
 
             TagAssignPopover(

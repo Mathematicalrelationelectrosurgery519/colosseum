@@ -82,12 +82,12 @@ struct BlockView: View {
             return .handled
         }
         .onKeyPress(.leftArrow) {
-            guard !showConnect else { return .ignored }
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return .ignored }
             step(-1)
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            guard !showConnect else { return .ignored }
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return .ignored }
             step(1)
             return .handled
         }
@@ -98,7 +98,7 @@ struct BlockView: View {
             return .handled
         }
         .onMoveCommand { direction in
-            guard !showConnect else { return }
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return }
             switch direction {
             case .left: step(-1)
             case .right: step(1)
@@ -106,16 +106,11 @@ struct BlockView: View {
             }
         }
         .background {
-            HStack {
-                Button("", action: handleEscape)
-                    .keyboardShortcut(.cancelAction)
-                Button("", action: { step(-1) })
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                Button("", action: { step(1) })
-                    .keyboardShortcut(.rightArrow, modifiers: [])
-            }
-            .opacity(0)
-            .allowsHitTesting(false)
+            // Escape only — arrow shortcuts must not steal caret movement from notes.
+            Button("", action: handleEscape)
+                .keyboardShortcut(.cancelAction)
+                .opacity(0)
+                .allowsHitTesting(false)
         }
         .sheet(isPresented: $showConnect) {
             if let block {

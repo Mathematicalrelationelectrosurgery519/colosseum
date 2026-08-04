@@ -241,13 +241,7 @@ struct ArenaBrowserView: View {
                             }
                             .buttonStyle(.plain)
                             .id(item.id)
-                            .overlay {
-                                if item.id == gridFocusID, isBrowsingGrid {
-                                    Rectangle()
-                                        .stroke(Color.white.opacity(0.85), lineWidth: 2)
-                                        .allowsHitTesting(false)
-                                }
-                            }
+                            .gridSelectionRing(isActive: item.id == gridFocusID && isBrowsingGrid)
                             .pointingHandCursor()
                             .onHover { hovering in
                                 handleHover(item: item, hovering: hovering)
