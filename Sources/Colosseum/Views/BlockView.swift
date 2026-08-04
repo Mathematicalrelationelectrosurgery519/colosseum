@@ -48,6 +48,7 @@ struct BlockView: View {
             HStack(spacing: 10) {
                 ShortcutHint(text: "←")
                 ShortcutHint(text: "→")
+                ShortcutHint(text: "⌘C")
                 ShortcutHint(text: "tab")
                 ShortcutHint(text: "esc")
             }
@@ -132,6 +133,10 @@ struct BlockView: View {
             return true
         }
         keyMonitor.onEscape = { handleEscape() }
+        keyMonitor.onCopy = {
+            guard let block else { return false }
+            return BlockClipboard.copy(block)
+        }
         keyMonitor.shouldIgnoreNavigation = { showConnect }
         keyMonitor.install()
     }

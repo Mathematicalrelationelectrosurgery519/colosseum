@@ -14,6 +14,8 @@ final class KeyNavMonitor {
     var onDelete: (() -> Void)?
     /// Control/Command+Z. Return true to consume.
     var onUndo: (() -> Bool)?
+    /// Command+C. Return true to consume.
+    var onCopy: (() -> Bool)?
     /// Unmodified character keys (lowercase). Return true to consume the event.
     var onCharacter: ((String) -> Bool)?
     /// When true, arrow / enter keys are left alone (e.g. text caret movement).
@@ -89,6 +91,12 @@ final class KeyNavMonitor {
                    event.charactersIgnoringModifiers?.lowercased() == "z",
                    let onUndo = self.onUndo,
                    onUndo() {
+                    return nil
+                }
+                if mods == [.command],
+                   event.charactersIgnoringModifiers?.lowercased() == "c",
+                   let onCopy = self.onCopy,
+                   onCopy() {
                     return nil
                 }
                 if mods.isEmpty,

@@ -312,8 +312,20 @@ struct ArenaBrowserView: View {
             if selectedItem != nil { return }
             handleEscape()
         }
+        keyMonitor.onCopy = {
+            guard isBrowsingGrid else { return false }
+            return copyFocusedItem()
+        }
         keyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         keyMonitor.install()
+    }
+
+    @discardableResult
+    private func copyFocusedItem() -> Bool {
+        guard let focusID = gridFocusID,
+              let item = model.items.first(where: { $0.id == focusID })
+        else { return false }
+        return BlockClipboard.copy(item)
     }
 
     private func moveGridFocus(delta: Int) {
@@ -627,6 +639,7 @@ private struct ArenaRemoteItemView: View {
             HStack(spacing: 10) {
                 ShortcutHint(text: "←")
                 ShortcutHint(text: "→")
+                ShortcutHint(text: "⌘C")
                 ShortcutHint(text: "esc")
             }
             .padding(16)
@@ -670,6 +683,10 @@ private struct ArenaRemoteItemView: View {
         keyMonitor.onLeft = { step(-1) }
         keyMonitor.onRight = { step(1) }
         keyMonitor.onEscape = { handleEscape() }
+        keyMonitor.onCopy = {
+            guard let item else { return false }
+            return BlockClipboard.copy(item)
+        }
         keyMonitor.shouldIgnoreNavigation = { showConnect }
         keyMonitor.install()
     }

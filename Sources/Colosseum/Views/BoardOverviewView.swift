@@ -366,6 +366,10 @@ struct BoardOverviewView: View {
             guard isBrowsingGrid, !isAssigningTag else { return false }
             return undoLastRemoval()
         }
+        boardKeyMonitor.onCopy = {
+            guard isBrowsingGrid, !isAssigningTag else { return false }
+            return copyFocusedBlock()
+        }
         boardKeyMonitor.onCharacter = { char in
             guard isBrowsingGrid else { return false }
             if char == "t" {
@@ -376,6 +380,14 @@ struct BoardOverviewView: View {
         }
         boardKeyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         boardKeyMonitor.install()
+    }
+
+    @discardableResult
+    private func copyFocusedBlock() -> Bool {
+        guard let focusID = gridFocusID,
+              let block = filteredConnections.first(where: { $0.id == focusID })?.block
+        else { return false }
+        return BlockClipboard.copy(block)
     }
 
     private func deleteFocusedConnection() {
