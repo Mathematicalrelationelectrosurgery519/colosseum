@@ -6,7 +6,7 @@ final class TagSuggestOverlay {
     enum Item: Equatable {
         /// Existing board tag.
         case tag(String)
-        /// Typed token with no matches — shown as `#query` plus a small `new` pill.
+        /// Typed token with no board matches — shown with a small `new` pill.
         case newTag(String)
 
         var tagName: String {
@@ -217,7 +217,7 @@ private final class SuggestTable: NSView {
     private static let rowHeight: CGFloat = 28
     private static let hPad: CGFloat = 10
     private static let vPad: CGFloat = 6
-    private static let width: CGFloat = 188
+    private static let width: CGFloat = 220
 
     static func fittingSize(forCount count: Int) -> CGSize {
         let rows = max(count, 1)
@@ -357,32 +357,40 @@ private final class SuggestRowButton: NSButton {
             bounds.insetBy(dx: -4, dy: 1).fill()
         }
 
+        let showsNewPill = {
+            if case .newTag = item { return true }
+            return false
+        }()
+        let pillReserve: CGFloat = showsNewPill ? 44 : 0
+
         let tagTitle = TagParser.displayLabel(item.tagName) as NSString
-        let tagColor: NSColor
-        switch item {
-        case .tag(let tag):
-            tagColor = isSelectedRow ? TagColor.nsColor(for: tag) : NSColor(ColosseumTheme.secondaryText)
-        case .newTag(let tag):
-            tagColor = isSelectedRow ? TagColor.nsColor(for: tag) : NSColor(ColosseumTheme.secondaryText)
-        }
+        let tagColor: NSColor = isSelectedRow
+            ? TagColor.nsColor(for: item.tagName)
+            : NSColor(ColosseumTheme.secondaryText)
 
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: isSelectedRow ? .medium : .regular),
             .foregroundColor: tagColor
         ]
         let titleSize = tagTitle.size(withAttributes: titleAttrs)
+        let maxTitleWidth = max(0, bounds.width - 12 - pillReserve)
         let titleOrigin = CGPoint(
             x: 6,
             y: (bounds.height - titleSize.height) / 2
         )
-        tagTitle.draw(at: titleOrigin, withAttributes: titleAttrs)
+        let titleRect = NSRect(
+            origin: titleOrigin,
+            size: CGSize(width: min(titleSize.width, maxTitleWidth), height: titleSize.height)
+        )
+        tagTitle.draw(with: titleRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: titleAttrs)
 
-        if case .newTag = item {
-            drawNewPill(afterTitleWidth: titleSize.width + 6)
+        if showsNewPill {
+            drawNewPill()
         }
     }
 
-    private func drawNewPill(afterTitleWidth: CGFloat) {
+    /// Always pinned to the trailing edge so it stays visible while the row is selected.
+    private func drawNewPill() {
         let label = "new" as NSString
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 9, weight: .medium),
@@ -393,7 +401,7 @@ private final class SuggestRowButton: NSButton {
         let padY: CGFloat = 2
         let pillSize = CGSize(width: textSize.width + padX * 2, height: textSize.height + padY * 2)
         let pillOrigin = CGPoint(
-            x: afterTitleWidth + 8,
+            x: bounds.width - pillSize.width - 4,
             y: (bounds.height - pillSize.height) / 2
         )
         let pillRect = NSRect(origin: pillOrigin, size: pillSize)
