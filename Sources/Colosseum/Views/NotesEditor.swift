@@ -193,7 +193,8 @@ struct NotesEditor: NSViewRepresentable {
                 return true
             }
             if commandSelector == #selector(NSResponder.insertNewline(_:))
-                || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                || commandSelector == #selector(NSResponder.insertTab(_:))
+                || commandSelector == #selector(NSResponder.insertTabIgnoringFieldEditor(_:)) {
                 suggest.acceptSelection()
                 return true
             }
@@ -420,6 +421,17 @@ final class TagAwareTextView: NSTextView {
     override func doCommand(by selector: Selector) {
         if onSuggestCommand?(selector) == true { return }
         super.doCommand(by: selector)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Tab often bypasses doCommand in free-standing NSTextViews; route it
+        // through suggest accept the same way Enter does.
+        if event.keyCode == 48,
+           !event.modifierFlags.contains(.shift),
+           onSuggestCommand?(#selector(NSResponder.insertTab(_:))) == true {
+            return
+        }
+        super.keyDown(with: event)
     }
 
     override func updateTrackingAreas() {

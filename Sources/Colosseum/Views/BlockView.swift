@@ -123,7 +123,7 @@ struct BlockView: View {
             return .handled
         }
         .onKeyPress(.tab) {
-            guard !showConnect else { return .ignored }
+            guard !showConnect, !KeyNavMonitor.isEditingText else { return .ignored }
             notesFocusNonce += 1
             focused = false
             return .handled
@@ -159,6 +159,7 @@ struct BlockView: View {
         keyMonitor.onDown = { moveConnectionFocus(1) }
         keyMonitor.onEnter = { activateFocusedBoardConnection() }
         keyMonitor.onTab = {
+            guard !KeyNavMonitor.isEditingText else { return false }
             notesFocusNonce += 1
             focused = false
             return true
@@ -175,6 +176,12 @@ struct BlockView: View {
     private func handleEscape() {
         if showConnect {
             showConnect = false
+            return
+        }
+        // Notes focused: first Esc blurs the field; second closes preview.
+        if KeyNavMonitor.isEditingText {
+            NSApp.keyWindow?.makeFirstResponder(nil)
+            focused = true
             return
         }
         onClose()

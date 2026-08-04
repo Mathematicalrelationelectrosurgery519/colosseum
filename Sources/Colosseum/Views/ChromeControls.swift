@@ -216,8 +216,10 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
     @Binding var columnCount: Int
     @Binding var tagMatchMode: TagMatchMode
     @Binding var boardsOnly: Bool
+    @Binding var uncategorizedOnly: Bool
     var showTagMode = false
     var showBoardsFilter = true
+    var showUncategorizedFilter = true
     var isImporting = false
     var visible = true
 
@@ -226,6 +228,9 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
             HStack(alignment: .center, spacing: 10) {
                 if isImporting {
                     ProgressView().controlSize(.small)
+                }
+                if showUncategorizedFilter {
+                    UncategorizedFilterIcon(isActive: $uncategorizedOnly)
                 }
                 if showBoardsFilter {
                     BoardsOnlyFilterIcon(isActive: $boardsOnly)

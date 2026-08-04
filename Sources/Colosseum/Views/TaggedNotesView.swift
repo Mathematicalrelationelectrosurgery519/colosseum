@@ -57,6 +57,33 @@ struct TagMatchModeIcon: View {
     }
 }
 
+/// Lowercase `c` toggle — show only untagged blocks (no nested/Are.na boards).
+struct UncategorizedFilterIcon: View {
+    @Binding var isActive: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(ColosseumMotion.soft) {
+                isActive.toggle()
+            }
+        } label: {
+            Text("c")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(isActive ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText)
+                .frame(width: 12, height: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(
+            isActive
+                ? "Showing uncategorized blocks only (C). Click to show all."
+                : "Uncategorized — blocks with no tags (C)"
+        )
+        .pointingHandCursor()
+        .animation(ColosseumMotion.soft, value: isActive)
+    }
+}
+
 /// Lowercase `b` toggle — show only nested boards and Are.na channel boards.
 struct BoardsOnlyFilterIcon: View {
     @Binding var isActive: Bool

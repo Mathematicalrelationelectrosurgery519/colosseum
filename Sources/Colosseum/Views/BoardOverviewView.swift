@@ -23,6 +23,7 @@ struct BoardOverviewView: View {
     @State private var tagSelectionOrder: [String] = []
     @State private var tagMatchMode: TagMatchMode = .intersection
     @State private var boardsOnly = false
+    @State private var uncategorizedOnly = false
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
     @AppStorage("showGridNotes") private var showGridNotes = true
     @State private var pinchBaseColumns: Int?
@@ -127,14 +128,20 @@ struct BoardOverviewView: View {
 
     private var filteredConnections: [Connection] {
         var result = connections
-        if boardsOnly {
+        if uncategorizedOnly {
+            result = result.filter { connection in
+                if connection.nestedBoard != nil { return false }
+                guard let block = connection.block, block.kind != .arenaChannel else { return false }
+                return TagParser.tags(for: connection).isEmpty
+            }
+        } else if boardsOnly {
             result = result.filter { connection in
                 if connection.nestedBoard != nil { return true }
                 if connection.block?.kind == .arenaChannel { return true }
                 return false
             }
         }
-        if !selectedTags.isEmpty {
+        if !uncategorizedOnly, !selectedTags.isEmpty {
             result = result.filter {
                 TagParser.matches(connection: $0, selected: selectedTags, mode: tagMatchMode)
             }
@@ -151,6 +158,7 @@ struct BoardOverviewView: View {
         var hasher = Hasher()
         hasher.combine(board.updatedAt.timeIntervalSinceReferenceDate)
         hasher.combine(boardsOnly)
+        hasher.combine(uncategorizedOnly)
         hasher.combine(tagMatchMode)
         hasher.combine(selectedTags)
         hasher.combine(showBoardSearch)
@@ -230,9 +238,23 @@ struct BoardOverviewView: View {
         ColosseumColumnSliderToolbar(
             columnCount: $columnCount,
             tagMatchMode: $tagMatchMode,
-            boardsOnly: $boardsOnly,
+            boardsOnly: Binding(
+                get: { boardsOnly },
+                set: { newValue in
+                    boardsOnly = newValue
+                    if newValue { uncategorizedOnly = false }
+                }
+            ),
+            uncategorizedOnly: Binding(
+                get: { uncategorizedOnly },
+                set: { newValue in
+                    uncategorizedOnly = newValue
+                    if newValue { boardsOnly = false }
+                }
+            ),
             showTagMode: !availableTags.isEmpty && arenaBrowseTarget == nil && !showBoardSearch,
             showBoardsFilter: true,
+            showUncategorizedFilter: arenaBrowseTarget == nil,
             isImporting: isImporting,
             visible: selectedConnectionID == nil && !isAssigningTag
                 && (isBrowsingGrid || showBoardSearch || arenaBrowseTarget != nil)
@@ -261,6 +283,8 @@ struct BoardOverviewView: View {
                     .keyboardShortcut("r", modifiers: .command)
                     Button("") { toggleTagMatchMode() }
                         .keyboardShortcut("u", modifiers: [])
+                    Button("") { toggleUncategorizedOnly() }
+                        .keyboardShortcut("c", modifiers: [])
                     Button("") { toggleBoardsOnly() }
                         .keyboardShortcut("b", modifiers: [])
                     Button("") { toggleGridNotes() }
@@ -369,11 +393,24 @@ struct BoardOverviewView: View {
         }
     }
 
+    private func toggleUncategorizedOnly() {
+        guard isBrowsingGrid else { return }
+        withAnimation(ColosseumMotion.soft) {
+            uncategorizedOnly.toggle()
+            if uncategorizedOnly {
+                boardsOnly = false
+            }
+        }
+    }
+
     private func toggleBoardsOnly() {
         // Local grid or hosted remote browser.
         guard isBrowsingGrid || arenaBrowseTarget != nil else { return }
         withAnimation(ColosseumMotion.soft) {
             boardsOnly.toggle()
+            if boardsOnly {
+                uncategorizedOnly = false
+            }
         }
     }
 
@@ -469,6 +506,11 @@ struct BoardOverviewView: View {
             return copyFocusedBlock()
         }
         boardKeyMonitor.onCharacter = { char in
+            if char == "c" {
+                guard isBrowsingGrid else { return false }
+                DispatchQueue.main.async { toggleUncategorizedOnly() }
+                return true
+            }
             if char == "b" {
                 guard isBrowsingGrid || arenaBrowseTarget != nil else { return false }
                 DispatchQueue.main.async { toggleBoardsOnly() }
@@ -803,6 +845,7 @@ struct BoardOverviewView: View {
                 .animation(ColosseumMotion.standard, value: selectedTags)
                 .animation(ColosseumMotion.standard, value: tagMatchMode)
                 .animation(ColosseumMotion.standard, value: boardsOnly)
+                .animation(ColosseumMotion.standard, value: uncategorizedOnly)
                 .animation(ColosseumMotion.standard, value: showGridNotes)
                 .animation(ColosseumMotion.soft, value: filteredListIdentity)
                 .animation(ColosseumMotion.standard, value: columnCount)
