@@ -142,6 +142,11 @@ enum ImportService {
             }
         }
 
+        // Prefer raw image bytes so animated GIFs aren't flattened via TIFF→PNG.
+        if let data = rawPasteboardImageData(from: pb) {
+            return .pastedImage(data)
+        }
+
         if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
            let image = images.first,
            let tiff = image.tiffRepresentation,
@@ -190,7 +195,10 @@ enum ImportService {
 
         case .pastedImage(let data):
             let blockID = UUID()
-            let dest = try MediaLibrary.writeData(data, into: blockID, filename: "pasteboard.png")
+            let isGIF = AnimatedImage.isGIF(data: data)
+            let filename = isGIF ? "pasteboard.gif" : "pasteboard.png"
+            let mime = isGIF ? "image/gif" : "image/png"
+            let dest = try MediaLibrary.writeData(data, into: blockID, filename: filename)
             let (w, h) = ThumbnailService.imageDimensions(at: dest)
             let thumb = try ThumbnailService.generateImageThumbnail(from: dest, blockID: blockID)
             let block = Block(
@@ -200,7 +208,7 @@ enum ImportService {
                 notes: trimmedNotes,
                 localRelativePath: MediaLibrary.relativePath(from: dest),
                 thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
-                mimeType: "image/png",
+                mimeType: mime,
                 byteSize: Int64(data.count),
                 width: w,
                 height: h
@@ -281,6 +289,22 @@ enum ImportService {
             context.insert(block)
             connect(block: block, to: board, context: context)
         }
+    }
+
+    /// Raw GIF/PNG bytes from the pasteboard, preserving animation when present.
+    /// TIFF is intentionally omitted — it's flattened via the NSImage path instead.
+    static func rawPasteboardImageData(from pb: NSPasteboard = .general) -> Data? {
+        let types: [NSPasteboard.PasteboardType] = [
+            .init(UTType.gif.identifier),
+            .init("com.compuserve.gif"),
+            .png
+        ]
+        for type in types {
+            if let data = pb.data(forType: type), !data.isEmpty {
+                return data
+            }
+        }
+        return nil
     }
 
     // MARK: - Existing entry points

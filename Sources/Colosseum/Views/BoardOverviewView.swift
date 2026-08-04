@@ -943,6 +943,12 @@ struct BoardOverviewView: View {
                         if let text = try await loadString(from: provider) {
                             strings.append(text)
                         }
+                    } else if provider.hasItemConformingToTypeIdentifier(UTType.gif.identifier),
+                              let data = try await loadData(from: provider, type: .gif) {
+                        try await importImageData(data, filename: "drop.gif", mimeType: "image/gif")
+                    } else if provider.hasItemConformingToTypeIdentifier(UTType.png.identifier),
+                              let data = try await loadData(from: provider, type: .png) {
+                        try await importImageData(data, filename: "drop.png", mimeType: "image/png")
                     } else if provider.canLoadObject(ofClass: NSImage.self) {
                         let image = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<NSImage, Error>) in
                             _ = provider.loadObject(ofClass: NSImage.self) { object, error in
@@ -983,8 +989,12 @@ struct BoardOverviewView: View {
               let data = rep.representation(using: .png, properties: [:])
         else { throw ImportService.ImportError.failed("Could not read image") }
 
+        try await importImageData(data, filename: "drop.png", mimeType: "image/png")
+    }
+
+    private func importImageData(_ data: Data, filename: String, mimeType: String) async throws {
         let blockID = UUID()
-        let dest = try MediaLibrary.writeData(data, into: blockID, filename: "drop.png")
+        let dest = try MediaLibrary.writeData(data, into: blockID, filename: filename)
         let (w, h) = ThumbnailService.imageDimensions(at: dest)
         let thumb = try ThumbnailService.generateImageThumbnail(from: dest, blockID: blockID)
         let block = Block(
@@ -993,13 +1003,22 @@ struct BoardOverviewView: View {
             title: "Dropped image",
             localRelativePath: MediaLibrary.relativePath(from: dest),
             thumbRelativePath: thumb.map { MediaLibrary.relativePath(from: $0) },
-            mimeType: "image/png",
+            mimeType: mimeType,
             byteSize: Int64(data.count),
             width: w,
             height: h
         )
         context.insert(block)
         ImportService.connect(block: block, to: board, context: context)
+    }
+
+    private func loadData(from provider: NSItemProvider, type: UTType) async throws -> Data? {
+        try await withCheckedThrowingContinuation { cont in
+            provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: data)
+            }
+        }
     }
 
     private func loadFileURL(from provider: NSItemProvider) async throws -> URL? {

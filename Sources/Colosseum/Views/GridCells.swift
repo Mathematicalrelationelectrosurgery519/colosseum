@@ -45,6 +45,10 @@ struct MediaBlockCell: View {
                     )
                     .allowsHitTesting(false)
                     .transition(ColosseumMotion.fade)
+                } else if block.isAnimatedImage, let path = block.localRelativePath {
+                    // Autoplay original GIF — thumbs are static JPEG frame 0.
+                    AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
+                        .allowsHitTesting(false)
                 } else {
                     thumbnail
                         .transition(ColosseumMotion.fade)

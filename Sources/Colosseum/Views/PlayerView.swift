@@ -3,6 +3,45 @@ import AVFoundation
 import AVKit
 import SwiftUI
 
+/// Plays multi-frame images (GIF) via AppKit — SwiftUI `Image` only shows frame 0.
+struct AnimatedImageView: NSViewRepresentable {
+    let url: URL
+    var imageScaling: NSImageScaling = .scaleProportionallyUpOrDown
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSImageView {
+        let view = NSImageView()
+        view.imageScaling = imageScaling
+        view.imageAlignment = .alignCenter
+        view.animates = true
+        context.coordinator.load(url: url, into: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSImageView, context: Context) {
+        nsView.imageScaling = imageScaling
+        if context.coordinator.currentURL != url {
+            context.coordinator.load(url: url, into: nsView)
+        } else {
+            // Re-assert after SwiftUI updates; animates must be true after image is set.
+            nsView.animates = true
+        }
+    }
+
+    final class Coordinator {
+        var currentURL: URL?
+
+        func load(url: URL, into view: NSImageView) {
+            currentURL = url
+            view.image = NSImage(contentsOf: url)
+            view.animates = true
+        }
+    }
+}
+
 /// Wraps `AVPlayerView` instead of SwiftUI `VideoPlayer`, which can abort when
 /// AVKit isn't fully linked in SPM/distributed macOS builds.
 struct PlayerView: NSViewRepresentable {

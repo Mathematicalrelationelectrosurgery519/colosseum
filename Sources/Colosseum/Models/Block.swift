@@ -92,4 +92,15 @@ final class Block {
         case .arenaChannel: return "are.na channel"
         }
     }
+
+    /// GIFs (and other multi-frame images) should play via `AnimatedImageView`.
+    var isAnimatedImage: Bool {
+        guard kind == .image else { return false }
+        if AnimatedImage.isGIF(mimeType: mimeType) { return true }
+        if let path = localRelativePath {
+            let ext = URL(fileURLWithPath: path).pathExtension
+            if AnimatedImage.isGIF(pathExtension: ext) { return true }
+        }
+        return false
+    }
 }

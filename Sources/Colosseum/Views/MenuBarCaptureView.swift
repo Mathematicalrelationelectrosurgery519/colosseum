@@ -415,7 +415,7 @@ struct MenuBarCaptureView: View {
            urls.contains(where: \.isFileURL) {
             return true
         }
-        if pb.availableType(from: [.png, .tiff]) != nil {
+        if pb.availableType(from: [.png, .tiff, .init("com.compuserve.gif")]) != nil {
             return true
         }
         if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],

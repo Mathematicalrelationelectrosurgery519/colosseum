@@ -14,6 +14,12 @@ enum BlockClipboard {
             guard let url = localFileURL(for: block) else { return false }
             let pb = NSPasteboard.general
             pb.clearContents()
+            // Write raw GIF bytes first so paste destinations keep animation.
+            if AnimatedImage.isGIF(url: url), let data = try? Data(contentsOf: url) {
+                pb.setData(data, forType: .init("com.compuserve.gif"))
+                pb.writeObjects([url as NSURL])
+                return true
+            }
             var items: [NSPasteboardWriting] = [url as NSURL]
             if let image = NSImage(contentsOf: url) {
                 items.insert(image, at: 0)

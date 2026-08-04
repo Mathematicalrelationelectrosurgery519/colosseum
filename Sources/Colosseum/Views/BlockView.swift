@@ -163,7 +163,10 @@ struct BlockView: View {
         case .image:
             if let path = block.localRelativePath {
                 let url = MediaLibrary.absoluteURL(relativePath: path)
-                if let image = NSImage(contentsOf: url) {
+                if block.isAnimatedImage || AnimatedImage.isAnimated(at: url) {
+                    AnimatedImageView(url: url)
+                        .padding(24)
+                } else if let image = NSImage(contentsOf: url) {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFit()
