@@ -48,6 +48,8 @@ struct MediaBlockCell: View {
                 } else if block.isAnimatedImage, let path = block.localRelativePath {
                     // Autoplay original GIF — thumbs are static JPEG frame 0.
                     AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                         .allowsHitTesting(false)
                 } else {
                     thumbnail

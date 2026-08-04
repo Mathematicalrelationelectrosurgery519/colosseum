@@ -4,6 +4,9 @@ import AVKit
 import SwiftUI
 
 /// Plays multi-frame images (GIF) via AppKit — SwiftUI `Image` only shows frame 0.
+///
+/// Uses a container that reports no intrinsic size so large GIFs don't blow up
+/// LazyVGrid cells the way a bare `NSImageView` would.
 struct AnimatedImageView: NSViewRepresentable {
     let url: URL
     var imageScaling: NSImageScaling = .scaleProportionallyUpOrDown
@@ -12,34 +15,55 @@ struct AnimatedImageView: NSViewRepresentable {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> NSImageView {
-        let view = NSImageView()
-        view.imageScaling = imageScaling
-        view.imageAlignment = .alignCenter
-        view.animates = true
-        context.coordinator.load(url: url, into: view)
-        return view
+    func makeNSView(context: Context) -> NSView {
+        let container = IntrinsicSizeIgnoringView()
+        let imageView = NSImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.imageScaling = imageScaling
+        imageView.imageAlignment = .alignCenter
+        imageView.animates = true
+        container.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: container.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        context.coordinator.imageView = imageView
+        context.coordinator.load(url: url)
+        return container
     }
 
-    func updateNSView(_ nsView: NSImageView, context: Context) {
-        nsView.imageScaling = imageScaling
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.imageView?.imageScaling = imageScaling
         if context.coordinator.currentURL != url {
-            context.coordinator.load(url: url, into: nsView)
+            context.coordinator.load(url: url)
         } else {
             // Re-assert after SwiftUI updates; animates must be true after image is set.
-            nsView.animates = true
+            context.coordinator.imageView?.animates = true
         }
     }
 
     final class Coordinator {
         var currentURL: URL?
+        weak var imageView: NSImageView?
 
-        func load(url: URL, into view: NSImageView) {
+        func load(url: URL) {
             currentURL = url
-            view.image = NSImage(contentsOf: url)
-            view.animates = true
+            guard let imageView else { return }
+            imageView.image = NSImage(contentsOf: url)
+            imageView.animates = true
         }
     }
+}
+
+/// `NSView` that never proposes its children's intrinsic size to SwiftUI layout.
+private final class IntrinsicSizeIgnoringView: NSView {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    override var isFlipped: Bool { true }
 }
 
 /// Wraps `AVPlayerView` instead of SwiftUI `VideoPlayer`, which can abort when
