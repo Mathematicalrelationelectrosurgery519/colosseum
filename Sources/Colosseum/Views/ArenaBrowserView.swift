@@ -108,14 +108,9 @@ struct ArenaBrowserView: View {
                         }
                         activateFocus()
                     },
-                    onOpenChannel: { item in
-                        guard let slug = item.channelSlug else { return }
+                    onBrowseBoard: { target in
                         withAnimation(ColosseumMotion.overlay) {
-                            push(ArenaBrowseTarget(
-                                slug: slug,
-                                title: item.title,
-                                urlString: item.previewURL
-                            ))
+                            push(target)
                             selectedItem = nil
                         }
                     }
@@ -656,7 +651,7 @@ private struct ArenaRemoteItemView: View {
     @Binding var selected: ArenaContentItem?
     var destinationBoard: Board?
     var onClose: () -> Void
-    var onOpenChannel: (ArenaContentItem) -> Void
+    var onBrowseBoard: (ArenaBrowseTarget) -> Void
 
     @Environment(\.modelContext) private var context
     @State private var loopingPlayer: LoopingVideoPlayer?
@@ -665,6 +660,9 @@ private struct ArenaRemoteItemView: View {
     @State private var statusMessage: String?
     @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
+    @State private var remoteConnections: [ArenaRemoteConnection] = []
+    @State private var isLoadingConnections = false
+    @State private var connectionsError: String?
 
     private var index: Int {
         guard let selected else { return 0 }
@@ -681,7 +679,7 @@ private struct ArenaRemoteItemView: View {
                 .onTapGesture { focused = true }
             Divider().overlay(ColosseumTheme.border)
             sidebar
-                .frame(width: ColosseumTheme.sidebarWidth)
+                .frame(width: ColosseumTheme.sidebarWidth, alignment: .leading)
         }
         .background(ColosseumTheme.canvas)
         .overlay(alignment: .bottomTrailing) {
@@ -701,12 +699,14 @@ private struct ArenaRemoteItemView: View {
             focused = true
             reloadPlayer()
             installKeyMonitor()
+            Task { await loadConnections() }
         }
         .onDisappear { keyMonitor.remove() }
         .onChange(of: selected?.id) { _, _ in
             focused = true
             showMeta = false
             reloadPlayer()
+            Task { await loadConnections() }
         }
         .onChange(of: showConnect) { _, _ in
             installKeyMonitor()
@@ -796,9 +796,17 @@ private struct ArenaRemoteItemView: View {
                         if let owner = item.channelOwnerName {
                             Text("by \(owner)").foregroundStyle(ColosseumTheme.secondaryText)
                         }
-                        Button("Browse Channel") { onOpenChannel(item) }
+                        if let slug = item.channelSlug {
+                            Button("Browse Channel") {
+                                onBrowseBoard(ArenaBrowseTarget(
+                                    slug: slug,
+                                    title: item.title,
+                                    urlString: item.previewURL
+                                ))
+                            }
                             .buttonStyle(ChromeButtonStyle(emphasized: true))
                             .pointingHandCursor()
+                        }
                     }
                 }
             }
@@ -819,6 +827,7 @@ private struct ArenaRemoteItemView: View {
                             Text("notes…")
                                 .font(.system(size: 13))
                                 .foregroundStyle(ColosseumTheme.tertiaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         if item.kind == .text, !item.textBody.isEmpty {
@@ -832,6 +841,7 @@ private struct ArenaRemoteItemView: View {
                         }
 
                         actionRow(for: item)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .overlay(alignment: .topTrailing) {
                                 if showMeta {
                                     remoteMetaOverlay(for: item)
@@ -846,20 +856,91 @@ private struct ArenaRemoteItemView: View {
                             Text(statusMessage)
                                 .font(.caption)
                                 .foregroundStyle(ColosseumTheme.secondaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         Text("Remote preview — not stored locally")
                             .font(.caption)
                             .foregroundStyle(ColosseumTheme.tertiaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 4)
+
+                        remoteConnectionsSection
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
                     .padding(.bottom, 24)
                 }
             }
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(ColosseumTheme.canvas)
+    }
+
+    @ViewBuilder
+    private var remoteConnectionsSection: some View {
+        Text("Connections \(remoteConnections.count)")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(ColosseumTheme.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+
+        if isLoadingConnections && remoteConnections.isEmpty {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } else if let connectionsError, remoteConnections.isEmpty {
+            Text(connectionsError)
+                .font(.caption)
+                .foregroundStyle(ColosseumTheme.tertiaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } else if remoteConnections.isEmpty {
+            Text("Not connected to any boards.")
+                .font(.caption)
+                .foregroundStyle(ColosseumTheme.tertiaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(remoteConnections) { connection in
+                    Button {
+                        onBrowseBoard(ArenaBrowseTarget(
+                            slug: connection.slug,
+                            title: connection.title,
+                            urlString: connection.arenaURLString
+                        ))
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(connection.title)
+                                    .foregroundStyle(ColosseumTheme.remoteBoardTitle)
+                                    .multilineTextAlignment(.leading)
+                                Text(
+                                    [
+                                        "\(connection.blockCount)",
+                                        connection.updatedAt.map(ColosseumFormatters.relativeDate)
+                                    ]
+                                    .compactMap { $0 }
+                                    .joined(separator: " · ")
+                                )
+                                .font(.caption)
+                                .foregroundStyle(ColosseumTheme.tertiaryText)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .pointingHandCursor()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+        }
     }
 
     @ViewBuilder
@@ -910,6 +991,8 @@ private struct ArenaRemoteItemView: View {
                     showMeta = hovering
                 }
             }
+
+            Spacer(minLength: 0)
         }
     }
 
@@ -1010,5 +1093,27 @@ private struct ArenaRemoteItemView: View {
         let next = VideoPlayback.looping(url: url, muted: false)
         loopingPlayer = next
         next.play()
+    }
+
+    @MainActor
+    private func loadConnections() async {
+        guard let item else {
+            remoteConnections = []
+            connectionsError = nil
+            return
+        }
+        let itemID = item.id
+        isLoadingConnections = true
+        connectionsError = nil
+        defer { isLoadingConnections = false }
+        do {
+            let connections = try await ArenaService.fetchConnections(for: item)
+            guard selected?.id == itemID else { return }
+            remoteConnections = connections
+        } catch {
+            guard selected?.id == itemID else { return }
+            remoteConnections = []
+            connectionsError = "Couldn’t load connections"
+        }
     }
 }

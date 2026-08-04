@@ -11,6 +11,21 @@ struct ArenaChannelPreview: Sendable {
     let notes: String
 }
 
+/// A board/channel connection pulled from Are.na for nested remote browsing.
+struct ArenaRemoteConnection: Sendable, Identifiable, Hashable {
+    let id: Int
+    let slug: String
+    let title: String
+    let ownerName: String
+    let ownerSlug: String
+    let blockCount: Int
+    let updatedAt: Date?
+
+    var arenaURLString: String {
+        "https://www.are.na/\(ownerSlug)/\(slug)"
+    }
+}
+
 struct ArenaContentItem: Sendable, Identifiable, Hashable {
     enum Kind: String, Sendable {
         case image
@@ -84,7 +99,9 @@ struct ArenaContentItem: Sendable, Identifiable, Hashable {
 }
 
 enum ArenaService {
-    private static let apiBase = URL(string: "https://api.are.na/v3/channels/")!
+    private static let channelsBase = URL(string: "https://api.are.na/v3/channels/")!
+    private static let blocksBase = URL(string: "https://api.are.na/v3/blocks/")!
+    private static let apiBase = channelsBase
 
     /// Parses Are.na channel URLs like:
     /// - https://www.are.na/user-slug/channel-slug
@@ -161,6 +178,42 @@ enum ArenaService {
             if page > 200 { break }
         }
         return items
+    }
+
+    /// Boards this block appears in (Are.na connections).
+    static func fetchBlockConnections(id: Int, perPage: Int = 24) async throws -> [ArenaRemoteConnection] {
+        try await fetchConnectionsPage(
+            url: blocksBase.appendingPathComponent("\(id)").appendingPathComponent("connections"),
+            perPage: perPage
+        )
+    }
+
+    /// Boards this channel appears in (Are.na connections).
+    static func fetchChannelConnections(slug: String, perPage: Int = 24) async throws -> [ArenaRemoteConnection] {
+        try await fetchConnectionsPage(
+            url: channelsBase.appendingPathComponent(slug).appendingPathComponent("connections"),
+            perPage: perPage
+        )
+    }
+
+    /// Connections for a remote item — block or nested channel.
+    static func fetchConnections(for item: ArenaContentItem, perPage: Int = 24) async throws -> [ArenaRemoteConnection] {
+        if item.kind == .channel, let slug = item.channelSlug, !slug.isEmpty {
+            return try await fetchChannelConnections(slug: slug, perPage: perPage)
+        }
+        return try await fetchBlockConnections(id: item.id, perPage: perPage)
+    }
+
+    private static func fetchConnectionsPage(url: URL, perPage: Int) async throws -> [ArenaRemoteConnection] {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "per", value: String(perPage))
+        ]
+        guard let requestURL = components.url else { throw URLError(.badURL) }
+        let data = try await get(requestURL)
+        let decoded = try JSONDecoder().decode(ArenaConnectionsPageDTO.self, from: data)
+        return decoded.data.compactMap { $0.asRemoteConnection() }
     }
 
     static func download(_ urlString: String) async throws -> Data {
@@ -268,6 +321,44 @@ private struct ArenaContentsPageDTO: Decodable {
         let next_page: Int?
         let has_more_pages: Bool?
         let total_count: Int?
+    }
+}
+
+private struct ArenaConnectionsPageDTO: Decodable {
+    let data: [ArenaConnectionChannelDTO]
+}
+
+private struct ArenaConnectionChannelDTO: Decodable {
+    let id: Int
+    let type: String?
+    let slug: String?
+    let title: String?
+    let updated_at: String?
+    let owner: Owner?
+    let counts: Counts?
+
+    struct Owner: Decodable {
+        let name: String?
+        let slug: String?
+    }
+
+    struct Counts: Decodable {
+        let blocks: Int?
+        let contents: Int?
+    }
+
+    func asRemoteConnection() -> ArenaRemoteConnection? {
+        guard let slug, !slug.isEmpty else { return nil }
+        let ownerSlug = owner?.slug ?? "are.na"
+        return ArenaRemoteConnection(
+            id: id,
+            slug: slug,
+            title: title?.isEmpty == false ? title! : slug,
+            ownerName: owner?.name ?? ownerSlug,
+            ownerSlug: ownerSlug,
+            blockCount: counts?.contents ?? counts?.blocks ?? 0,
+            updatedAt: ArenaService.parseDate(updated_at)
+        )
     }
 }
 
