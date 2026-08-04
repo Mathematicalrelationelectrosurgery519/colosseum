@@ -260,7 +260,9 @@ struct ColumnDensityControl: View {
 struct ColosseumColumnSliderToolbar: ToolbarContent {
     @Binding var columnCount: Int
     @Binding var tagMatchMode: TagMatchMode
+    @Binding var boardsOnly: Bool
     var showTagMode = false
+    var showBoardsFilter = true
     var isImporting = false
     var visible = true
 
@@ -269,6 +271,9 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
             HStack(alignment: .center, spacing: 10) {
                 if isImporting {
                     ProgressView().controlSize(.small)
+                }
+                if showBoardsFilter {
+                    BoardsOnlyFilterIcon(isActive: $boardsOnly)
                 }
                 if showTagMode {
                     TagMatchModeIcon(mode: $tagMatchMode)

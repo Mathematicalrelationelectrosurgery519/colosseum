@@ -57,6 +57,33 @@ struct TagMatchModeIcon: View {
     }
 }
 
+/// Lowercase `b` toggle — show only nested / channel boards in the grid.
+struct BoardsOnlyFilterIcon: View {
+    @Binding var isActive: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(ColosseumMotion.soft) {
+                isActive.toggle()
+            }
+        } label: {
+            Text("b")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(isActive ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText)
+                .frame(width: 12, height: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(
+            isActive
+                ? "Showing boards only (B). Click to show all."
+                : "Boards only (B)"
+        )
+        .pointingHandCursor()
+        .animation(ColosseumMotion.soft, value: isActive)
+    }
+}
+
 /// Centered, horizontally scrollable tag strip for the board header.
 struct TagHeaderScroller: View {
     let tags: [String]

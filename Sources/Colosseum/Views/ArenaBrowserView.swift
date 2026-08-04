@@ -10,6 +10,8 @@ struct ArenaBrowserView: View {
     var destinationBoard: Board?
     /// When false, host window toolbar shows the path (board-hosted). When true, draw matching chrome inline.
     var showsInlineChrome: Bool = true
+    /// Shared with host toolbar when chrome is external; otherwise uses local state.
+    var boardsOnly: Binding<Bool>? = nil
     var onClose: () -> Void
     var onImportedBoard: ((Board) -> Void)?
 
@@ -30,8 +32,29 @@ struct ArenaBrowserView: View {
     @State private var isPinching = false
     @State private var pinchDidChange = false
     @State private var suppressGridClicksUntil: Date?
+    @State private var localBoardsOnly = false
 
     private var isBrowsingGrid: Bool { selectedItem == nil }
+
+    private var boardsOnlyActive: Binding<Bool> {
+        Binding(
+            get: { boardsOnly?.wrappedValue ?? localBoardsOnly },
+            set: { newValue in
+                if let boardsOnly {
+                    boardsOnly.wrappedValue = newValue
+                } else {
+                    localBoardsOnly = newValue
+                }
+            }
+        )
+    }
+
+    private var displayedItems: [ArenaContentItem] {
+        if boardsOnlyActive.wrappedValue {
+            return model.items.filter { $0.kind == .channel }
+        }
+        return model.items
+    }
 
     private var columns: [GridItem] {
         let count = min(max(columnCount, ChromeMetrics.boardColumnsMin), ChromeMetrics.boardColumnsMax)
@@ -124,11 +147,17 @@ struct ArenaBrowserView: View {
             gridFocusID = nil
             activateFocus()
         }
-        .onChange(of: model.items.map(\.id)) { _, ids in
+        .onChange(of: displayedItems.map(\.id)) { _, ids in
             if let gridFocusID, !ids.contains(gridFocusID) {
                 self.gridFocusID = ids.first
             } else if gridFocusID == nil {
                 gridFocusID = ids.first
+            }
+        }
+        .onChange(of: boardsOnlyActive.wrappedValue) { _, _ in
+            let ids = Set(displayedItems.map(\.id))
+            if let gridFocusID, !ids.contains(gridFocusID) {
+                self.gridFocusID = displayedItems.first?.id
             }
         }
         .onExitCommand(perform: handleEscape)
@@ -137,10 +166,18 @@ struct ArenaBrowserView: View {
             return .handled
         }
         .background {
-            Button("", action: handleEscape)
-                .keyboardShortcut(.cancelAction)
-                .opacity(0)
-                .allowsHitTesting(false)
+            Group {
+                Button("") {
+                    withAnimation(ColosseumMotion.soft) {
+                        boardsOnlyActive.wrappedValue.toggle()
+                    }
+                }
+                .keyboardShortcut("b", modifiers: [])
+                Button("", action: handleEscape)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenCommand)) { _ in
             openOnArena()
@@ -190,7 +227,10 @@ struct ArenaBrowserView: View {
             }
 
             if isBrowsingGrid {
-                ColumnDensityControl(columnCount: $columnCount)
+                HStack(alignment: .center, spacing: 10) {
+                    BoardsOnlyFilterIcon(isActive: boardsOnlyActive)
+                    ColumnDensityControl(columnCount: $columnCount)
+                }
             }
         }
         .padding(.horizontal, ChromeMetrics.contentInset)
@@ -227,7 +267,7 @@ struct ArenaBrowserView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                        ForEach(model.items) { item in
+                        ForEach(displayedItems) { item in
                             Button {
                                 guard !shouldSuppressGridClicks else { return }
                                 gridFocusID = item.id
@@ -247,7 +287,12 @@ struct ArenaBrowserView: View {
                                 handleHover(item: item, hovering: hovering)
                             }
                             .onAppear {
-                                model.loadMoreIfNeeded(currentItem: item)
+                                // With boards-only, keep paging off the full list so sparse channels still load.
+                                if boardsOnlyActive.wrappedValue {
+                                    model.loadMoreIfNeeded(currentItem: model.items.last)
+                                } else {
+                                    model.loadMoreIfNeeded(currentItem: item)
+                                }
                             }
                             .contextMenu {
                                 if let destinationBoard {
@@ -267,6 +312,7 @@ struct ArenaBrowserView: View {
                     }
                     .padding(28)
                     .animation(ColosseumMotion.standard, value: columnCount)
+                    .animation(ColosseumMotion.standard, value: boardsOnlyActive.wrappedValue)
                     .allowsHitTesting(!isPinching)
 
                     if model.isLoadingMore {
@@ -290,7 +336,7 @@ struct ArenaBrowserView: View {
         DispatchQueue.main.async {
             focused = true
             if gridFocusID == nil {
-                gridFocusID = model.items.first?.id
+                gridFocusID = displayedItems.first?.id
             }
         }
     }
@@ -310,6 +356,15 @@ struct ArenaBrowserView: View {
             guard isBrowsingGrid else { return false }
             return copyFocusedItem()
         }
+        keyMonitor.onCharacter = { char in
+            guard isBrowsingGrid, char == "b" else { return false }
+            DispatchQueue.main.async {
+                withAnimation(ColosseumMotion.soft) {
+                    boardsOnlyActive.wrappedValue.toggle()
+                }
+            }
+            return true
+        }
         keyMonitor.shouldIgnoreNavigation = { !isBrowsingGrid }
         keyMonitor.install()
     }
@@ -317,14 +372,14 @@ struct ArenaBrowserView: View {
     @discardableResult
     private func copyFocusedItem() -> Bool {
         guard let focusID = gridFocusID,
-              let item = model.items.first(where: { $0.id == focusID })
+              let item = displayedItems.first(where: { $0.id == focusID })
         else { return false }
         return BlockClipboard.copy(item)
     }
 
     private func moveGridFocus(delta: Int) {
         guard isBrowsingGrid else { return }
-        let items = model.items
+        let items = displayedItems
         guard !items.isEmpty else { return }
         focused = true
         if let idx = items.firstIndex(where: { $0.id == gridFocusID }) {
@@ -342,7 +397,7 @@ struct ArenaBrowserView: View {
 
     private func activateFocusedItem() {
         guard isBrowsingGrid else { return }
-        let items = model.items
+        let items = displayedItems
         let target = items.first(where: { $0.id == gridFocusID }) ?? items.first
         guard let item = target else { return }
         gridFocusID = item.id

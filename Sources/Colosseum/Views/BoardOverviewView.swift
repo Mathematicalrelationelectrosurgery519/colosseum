@@ -22,6 +22,7 @@ struct BoardOverviewView: View {
     @State private var selectedTags: Set<String> = []
     @State private var tagSelectionOrder: [String] = []
     @State private var tagMatchMode: TagMatchMode = .intersection
+    @State private var boardsOnly = false
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
     @State private var pinchBaseColumns: Int?
     @State private var lastPinchStep = 0
@@ -100,8 +101,12 @@ struct BoardOverviewView: View {
     }
 
     private var filteredConnections: [Connection] {
-        guard !selectedTags.isEmpty else { return connections }
-        return connections.filter {
+        var result = connections
+        if boardsOnly {
+            result = result.filter { $0.nestedBoard != nil }
+        }
+        guard !selectedTags.isEmpty else { return result }
+        return result.filter {
             TagParser.matches(connection: $0, selected: selectedTags, mode: tagMatchMode)
         }
     }
@@ -167,7 +172,9 @@ struct BoardOverviewView: View {
                 ColosseumColumnSliderToolbar(
                     columnCount: $columnCount,
                     tagMatchMode: $tagMatchMode,
+                    boardsOnly: $boardsOnly,
                     showTagMode: !availableTags.isEmpty && arenaBrowseTarget == nil,
+                    showBoardsFilter: true,
                     isImporting: isImporting,
                     visible: (isBrowsingGrid || arenaBrowseTarget != nil) && !isAssigningTag
                 )
@@ -187,6 +194,8 @@ struct BoardOverviewView: View {
                         .keyboardShortcut("n", modifiers: [])
                     Button("") { setTagMatchMode(.union) }
                         .keyboardShortcut("u", modifiers: [])
+                    Button("") { toggleBoardsOnly() }
+                        .keyboardShortcut("b", modifiers: [])
                 }
                 .opacity(0)
                 .allowsHitTesting(false)
@@ -290,6 +299,14 @@ struct BoardOverviewView: View {
         }
     }
 
+    private func toggleBoardsOnly() {
+        // Local grid or hosted remote browser.
+        guard isBrowsingGrid || arenaBrowseTarget != nil else { return }
+        withAnimation(ColosseumMotion.soft) {
+            boardsOnly.toggle()
+        }
+    }
+
     private func selectOnlyTag(_ tag: String) {
         let key = TagParser.normalize(tag)
         selectedTags = [key]
@@ -371,6 +388,11 @@ struct BoardOverviewView: View {
             return copyFocusedBlock()
         }
         boardKeyMonitor.onCharacter = { char in
+            if char == "b" {
+                guard isBrowsingGrid || arenaBrowseTarget != nil else { return false }
+                DispatchQueue.main.async { toggleBoardsOnly() }
+                return true
+            }
             guard isBrowsingGrid else { return false }
             if char == "t" {
                 DispatchQueue.main.async { toggleTagAssign() }
@@ -598,6 +620,7 @@ struct BoardOverviewView: View {
                     stack: $arenaStack,
                     destinationBoard: board,
                     showsInlineChrome: false,
+                    boardsOnly: $boardsOnly,
                     onClose: {
                         withAnimation(ColosseumMotion.overlay) {
                             self.arenaBrowseTarget = nil
@@ -650,6 +673,7 @@ struct BoardOverviewView: View {
                 .padding(.bottom, isAssigningTag ? 200 : 0)
                 .animation(ColosseumMotion.standard, value: selectedTags)
                 .animation(ColosseumMotion.standard, value: tagMatchMode)
+                .animation(ColosseumMotion.standard, value: boardsOnly)
                 .animation(ColosseumMotion.soft, value: filteredConnections.map(\.id))
                 .animation(ColosseumMotion.standard, value: columnCount)
                 .allowsHitTesting(!isPinching && !isAssigningTag)
