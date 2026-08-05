@@ -70,7 +70,13 @@ struct ConnectSheet: View {
             overlayFocused = true
             installKeyMonitor()
         }
-        .onDisappear { keyMonitor.remove() }
+        .onDisappear {
+            keyMonitor.remove()
+            if let block, block.connections.isEmpty {
+                ImportService.deleteOrphanedBlockIfNeeded(block, context: context)
+                try? context.save()
+            }
+        }
         .onChange(of: mode) { _, newMode in
             errorMessage = nil
             installKeyMonitor()
@@ -85,7 +91,7 @@ struct ConnectSheet: View {
         .onChange(of: search) { _, _ in revalidateSelection() }
         .onChange(of: boards.map(\.id)) { _, _ in revalidateSelection() }
         .onExitCommand(perform: handleEscape)
-        .interactiveDismissDisabled(isSaving)
+        .interactiveDismissDisabled()
     }
 
     private var header: some View {
@@ -166,7 +172,7 @@ struct ConnectSheet: View {
             }
 
             HStack {
-                Text("↑↓ select  ·  ↩ connect  ·  tab filter  ·  n new  ·  esc close")
+                Text("↑↓ select  ·  ↩ toggle  ·  tab filter  ·  n new  ·  esc close")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(ColosseumTheme.tertiaryText)
                 Spacer(minLength: 0)
@@ -224,9 +230,8 @@ struct ConnectSheet: View {
         let connected = isConnected(to: board)
         let selected = selectedBoardID == board.id
         return Button {
-            guard !connected else { return }
             selectedBoardID = board.id
-            Task { await connect(to: board) }
+            Task { await toggle(board) }
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -253,8 +258,8 @@ struct ConnectSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isSaving || connected)
-        .pointingHandCursor(enabled: !connected)
+        .disabled(isSaving)
+        .pointingHandCursor()
         .overlay(alignment: .bottom) {
             Rectangle().fill(ColosseumTheme.border).frame(height: 0.5)
         }
@@ -297,10 +302,9 @@ struct ConnectSheet: View {
         guard mode == .selection,
               let selectedBoardID,
               let board = filtered.first(where: { $0.id == selectedBoardID }),
-              !isConnected(to: board),
               !isSaving
         else { return }
-        Task { await connect(to: board) }
+        Task { await toggle(board) }
     }
 
     private func revalidateSelection() {
@@ -331,27 +335,7 @@ struct ConnectSheet: View {
     }
 
     private func isConnected(to board: Board) -> Bool {
-        if let block {
-            return board.connections.contains { $0.block?.id == block.id }
-        }
-        if let nestedBoard {
-            return board.connections.contains { $0.nestedBoard?.id == nestedBoard.id }
-        }
-        guard let remoteItem else { return false }
-        return board.connections.contains { connection in
-            guard let existing = connection.block else { return false }
-            if remoteItem.kind == .channel {
-                return existing.kind == .arenaChannel
-                    && existing.arenaSlug == remoteItem.channelSlug
-            }
-            if existing.arenaBlockID == remoteItem.id { return true }
-            let remoteURLs = [
-                remoteItem.sourceURL,
-                remoteItem.imageURL,
-                remoteItem.attachmentURL
-            ].compactMap { $0 }
-            return existing.sourceURL.map(remoteURLs.contains) == true
-        }
+        matchingConnection(in: board) != nil
     }
 
     @MainActor
@@ -363,7 +347,10 @@ struct ConnectSheet: View {
         do {
             try await connectTarget(to: board)
             try context.save()
-            dismiss()
+            isSaving = false
+            newBoardTitle = ""
+            selectedBoardID = board.id
+            withAnimation(ColosseumMotion.overlay) { mode = .selection }
         } catch {
             context.delete(board)
             errorMessage = error.localizedDescription
@@ -372,13 +359,21 @@ struct ConnectSheet: View {
     }
 
     @MainActor
-    private func connect(to board: Board) async {
+    private func toggle(_ board: Board) async {
         errorMessage = nil
         isSaving = true
         do {
-            try await connectTarget(to: board)
+            if let connection = matchingConnection(in: board) {
+                ImportService.removeConnection(
+                    connection,
+                    deleteOrphanedBlock: block == nil,
+                    context: context
+                )
+            } else {
+                try await connectTarget(to: board)
+            }
             try context.save()
-            dismiss()
+            isSaving = false
         } catch {
             errorMessage = error.localizedDescription
             isSaving = false
@@ -394,6 +389,30 @@ struct ConnectSheet: View {
             ImportService.connect(block: block, to: board, context: context)
         } else if let nestedBoard {
             ImportService.connect(nestedBoard: nestedBoard, to: board, context: context)
+        }
+    }
+
+    private func matchingConnection(in board: Board) -> Connection? {
+        if let block {
+            return board.connections.first { $0.block?.id == block.id }
+        }
+        if let nestedBoard {
+            return board.connections.first { $0.nestedBoard?.id == nestedBoard.id }
+        }
+        guard let remoteItem else { return nil }
+        return board.connections.first { connection in
+            guard let existing = connection.block else { return false }
+            if remoteItem.kind == .channel {
+                return existing.kind == .arenaChannel
+                    && existing.arenaSlug == remoteItem.channelSlug
+            }
+            if existing.arenaBlockID == remoteItem.id { return true }
+            let remoteURLs = [
+                remoteItem.sourceURL,
+                remoteItem.imageURL,
+                remoteItem.attachmentURL
+            ].compactMap { $0 }
+            return existing.sourceURL.map(remoteURLs.contains) == true
         }
     }
 }
