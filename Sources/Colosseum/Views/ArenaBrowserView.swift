@@ -610,7 +610,7 @@ struct ArenaBrowserView: View {
             onClose()
             return
         }
-        _ = withAnimation(ColosseumMotion.soft) {
+        withAnimation(ColosseumMotion.soft) {
             boardsOnlyActive.wrappedValue = false
             stack.removeLast()
         }

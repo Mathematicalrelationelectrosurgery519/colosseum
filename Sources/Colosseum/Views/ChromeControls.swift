@@ -107,29 +107,80 @@ struct BoardPathBreadcrumb: View {
     var currentColor: Color = ColosseumTheme.primaryText
     var onSegmentTap: (Int) -> Void
 
+    private struct DisplaySegment: Identifiable {
+        let id: String
+        let title: String
+        let originalIndex: Int
+        let helpTitle: String
+    }
+
+    private var displaySegments: [DisplaySegment] {
+        guard segments.count > 3 else {
+            return segments.enumerated().map { index, segment in
+                DisplaySegment(
+                    id: segment.id,
+                    title: segment.title,
+                    originalIndex: index,
+                    helpTitle: segment.title
+                )
+            }
+        }
+
+        let lastHiddenIndex = segments.count - 3
+        let visibleIndices = [0, segments.count - 2, segments.count - 1]
+        return [
+            DisplaySegment(
+                id: segments[0].id,
+                title: segments[0].title,
+                originalIndex: 0,
+                helpTitle: segments[0].title
+            ),
+            DisplaySegment(
+                id: "collapsed-middle",
+                title: "...",
+                originalIndex: lastHiddenIndex,
+                helpTitle: segments[lastHiddenIndex].title
+            )
+        ] + visibleIndices.dropFirst().map { index in
+            DisplaySegment(
+                id: segments[index].id,
+                title: segments[index].title,
+                originalIndex: index,
+                helpTitle: segments[index].title
+            )
+        }
+    }
+
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
-                if index > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(ColosseumTheme.tertiaryText.opacity(0.8))
-                }
-                let isCurrent = index == segments.count - 1
-                let opacity = breadcrumbOpacity(index: index, count: segments.count)
-                Text(segment.title)
-                    .font(.system(size: 13, weight: isCurrent ? .semibold : .medium))
-                    .foregroundStyle(isCurrent ? currentColor : ColosseumTheme.primaryText)
-                    .opacity(opacity)
-                    .lineLimit(1)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard !isCurrent else { return }
-                        onSegmentTap(index)
+            ForEach(Array(displaySegments.enumerated()), id: \.element.id) { displayIndex, segment in
+                HStack(spacing: 6) {
+                    if displayIndex > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(ColosseumTheme.tertiaryText.opacity(0.8))
                     }
-                    .pointingHandCursor(enabled: !isCurrent)
-                    .help(isCurrent ? segment.title : "Go to \(segment.title)")
+                    let isCurrent = segment.originalIndex == segments.count - 1
+                    let opacity = breadcrumbOpacity(index: segment.originalIndex, count: segments.count)
+                    Text(segment.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isCurrent ? currentColor : ColosseumTheme.primaryText)
+                        .opacity(opacity)
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard !isCurrent else { return }
+                            onSegmentTap(segment.originalIndex)
+                        }
+                        .pointingHandCursor(enabled: !isCurrent)
+                        .help(isCurrent ? segment.helpTitle : "Go to \(segment.helpTitle)")
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
+        }
+        // Path transitions should move app content, not interpolate toolbar glyphs.
+        .transaction { transaction in
+            transaction.animation = nil
         }
     }
 
