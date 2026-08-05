@@ -46,6 +46,10 @@ struct MediaBlockCell: View {
         block.kind == .video && wantsPlayback
     }
 
+    private var shouldPlayAudio: Bool {
+        block.kind == .audio && wantsPlayback
+    }
+
     var body: some View {
         // Size from a square surface (like AddBlockCell), never from media intrinsic size.
         // Cached thumb stays under live media so selection/hover does not reload-flash.
@@ -75,6 +79,11 @@ struct MediaBlockCell: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(8)
+            } else if block.kind == .audio {
+                Image(systemName: shouldPlayAudio ? "speaker.wave.2.fill" : "waveform")
+                    .font(.system(size: shouldPlayAudio ? 14 : 24, weight: .light))
+                    .foregroundStyle(shouldPlayAudio ? Color.white : ColosseumTheme.secondaryText)
+                    .padding(8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,7 +96,7 @@ struct MediaBlockCell: View {
         }
         .onAppear { syncVideoPlayback() }
         .onContinuousHover { phase in
-            guard block.kind == .video || block.isAnimatedImage else { return }
+            guard block.kind == .video || block.kind == .audio || block.isAnimatedImage else { return }
             switch phase {
             case .active:
                 if !isHovering {
@@ -138,7 +147,7 @@ struct MediaBlockCell: View {
     }
 
     private var placeholder: some View {
-        Image(systemName: block.kind == .video ? "video" : "photo")
+        Image(systemName: block.kind == .video ? "video" : block.kind == .audio ? "waveform" : "photo")
             .font(.system(size: 24, weight: .light))
             .foregroundStyle(ColosseumTheme.tertiaryText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -161,12 +170,15 @@ struct MediaBlockCell: View {
     }
 
     private func syncVideoPlayback() {
-        guard block.kind == .video else { return }
-        if shouldPlayVideo {
+        guard block.kind == .video || block.kind == .audio else { return }
+        if shouldPlayVideo || shouldPlayAudio {
             if let path = block.localRelativePath {
-                videoSession.start(url: MediaLibrary.absoluteURL(relativePath: path))
+                videoSession.start(
+                    url: MediaLibrary.absoluteURL(relativePath: path),
+                    muted: block.kind == .video
+                )
             } else if let urlString = block.remoteMediaURL, let url = URL(string: urlString) {
-                videoSession.start(url: url)
+                videoSession.start(url: url, muted: block.kind == .video)
             }
         } else {
             videoSession.stop()

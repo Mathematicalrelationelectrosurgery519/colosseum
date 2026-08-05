@@ -1438,7 +1438,7 @@ struct BoardOverviewView: View {
             NestedBoardCell(board: nested)
         } else if let block = connection.block {
             switch block.kind {
-            case .image, .video:
+            case .image, .video, .audio:
                 MediaBlockCell(block: block, isSelected: isSelected)
             case .text:
                 TextBlockCell(block: block)
@@ -1602,7 +1602,11 @@ struct BoardOverviewView: View {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.image, .movie, .mpeg4Movie, .quickTimeMovie, .png, .jpeg, .gif, .webP, .heic]
+        panel.allowedContentTypes = [
+            .image, .movie, .audio, .mpeg4Movie, .quickTimeMovie,
+            .mp3, .mpeg4Audio, .wav, .aiff,
+            .png, .jpeg, .gif, .webP, .heic
+        ]
         guard panel.runModal() == .OK else { return }
         Task { await importURLs(panel.urls) }
     }

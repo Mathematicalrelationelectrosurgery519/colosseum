@@ -88,6 +88,8 @@ enum ArenaImportService {
         case .attachment:
             if item.isVideo {
                 kind = .video
+            } else if item.isAudio {
+                kind = .audio
             } else if item.attachmentMime?.lowercased().hasPrefix("image/") == true || item.imageURL != nil {
                 kind = .image
             } else {
@@ -102,7 +104,7 @@ enum ArenaImportService {
         }
 
         let mediaURL: String?
-        if kind == .video {
+        if kind == .video || kind == .audio {
             mediaURL = item.attachmentURL
         } else if kind == .image {
             mediaURL = item.imageURL ?? item.attachmentURL
@@ -113,7 +115,9 @@ enum ArenaImportService {
             ?? (kind == .link ? item.attachmentURL : nil)
             ?? mediaURL
             ?? item.previewURL
-        let bytes = kind == .video ? item.attachmentBytes : max(item.imageBytes, item.attachmentBytes)
+        let bytes = kind == .video || kind == .audio
+            ? item.attachmentBytes
+            : max(item.imageBytes, item.attachmentBytes)
         let arenaURL = item.kind == .channel
             ? item.previewURL
             : "https://www.are.na/block/\(item.id)"
@@ -123,7 +127,9 @@ enum ArenaImportService {
             title: item.title.isEmpty ? item.displayTitle : item.title,
             notes: item.notes,
             sourceURL: sourceURL,
-            mimeType: kind == .video ? item.attachmentMime : item.imageMime ?? item.attachmentMime,
+            mimeType: kind == .video || kind == .audio
+                ? item.attachmentMime
+                : item.imageMime ?? item.attachmentMime,
             byteSize: bytes,
             width: item.imageWidth,
             height: item.imageHeight,
@@ -155,6 +161,9 @@ enum ArenaImportService {
             if let mime = item.attachmentMime?.lowercased(), mime.hasPrefix("video/"),
                let url = item.attachmentURL {
                 try await importVideo(from: url, item: item, into: board, context: context)
+            } else if let mime = item.attachmentMime?.lowercased(), mime.hasPrefix("audio/"),
+                      let url = item.attachmentURL {
+                try await importAudio(from: url, item: item, into: board, context: context)
             } else if let mime = item.attachmentMime?.lowercased(), mime.hasPrefix("image/"),
                       let url = item.attachmentURL {
                 try await importRemoteImage(urlString: url, item: item, into: board, context: context)
@@ -331,13 +340,44 @@ enum ArenaImportService {
         ImportService.connect(block: block, to: board, context: context)
     }
 
+    private static func importAudio(
+        from urlString: String,
+        item: ArenaContentItem,
+        into board: Board,
+        context: ModelContext
+    ) async throws {
+        let data = try await ArenaService.download(urlString)
+        let blockID = UUID()
+        let filename = item.attachmentFilename
+            ?? URL(string: urlString)?.lastPathComponent
+            ?? "audio.mp3"
+        let dest = try MediaLibrary.writeData(data, into: blockID, filename: filename)
+        let meta = await ThumbnailService.videoMetadata(at: dest)
+        let block = Block(
+            id: blockID,
+            kind: .audio,
+            title: item.title.isEmpty ? filename : item.title,
+            notes: item.notes,
+            sourceURL: urlString,
+            localRelativePath: MediaLibrary.relativePath(from: dest),
+            mimeType: item.attachmentMime ?? "audio/mpeg",
+            byteSize: Int64(data.count),
+            duration: meta.duration
+        )
+        applyArenaMetadata(item, to: block)
+        context.insert(block)
+        ImportService.connect(block: block, to: board, context: context)
+    }
+
     private static func applyArenaMetadata(_ item: ArenaContentItem, to block: Block) {
         block.arenaBlockID = item.kind == .channel ? nil : item.id
         block.arenaTypeName = item.typeName
         block.arenaOwnerName = item.channelOwnerName
         block.arenaOwnerSlug = item.channelOwnerSlug
         block.arenaUpdatedAt = item.channelUpdatedAt
-        block.remoteMediaURL = item.isVideo ? item.attachmentURL : item.imageURL ?? item.attachmentURL
+        block.remoteMediaURL = item.isVideo || item.isAudio
+            ? item.attachmentURL
+            : item.imageURL ?? item.attachmentURL
         block.remoteThumbnailURL = item.gridImageURL
         if item.kind != .channel {
             block.arenaURL = "https://www.are.na/block/\(item.id)"

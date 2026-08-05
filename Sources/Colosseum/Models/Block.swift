@@ -102,6 +102,7 @@ final class Block {
         switch kind {
         case .image: return mimeType ?? "image"
         case .video: return mimeType ?? "video"
+        case .audio: return mimeType ?? "audio"
         case .link: return "link"
         case .text: return "text"
         case .arenaChannel: return "are.na channel"
@@ -120,6 +121,8 @@ final class Block {
     }
 
     var isRemoteMediaReference: Bool {
-        localRelativePath == nil && remoteMediaURL != nil && (kind == .image || kind == .video)
+        localRelativePath == nil
+            && remoteMediaURL != nil
+            && (kind == .image || kind == .video || kind == .audio)
     }
 }

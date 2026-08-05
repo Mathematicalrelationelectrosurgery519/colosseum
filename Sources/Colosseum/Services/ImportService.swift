@@ -34,6 +34,7 @@ enum CaptureDraft {
             switch remote.kind {
             case .image: return .image
             case .video: return .video
+            case .audio: return .audio
             case .link: return .link
             }
         case .pastedImage: return .image
@@ -41,6 +42,7 @@ enum CaptureDraft {
         case .localFile(let url):
             let type = UTType(filenameExtension: url.pathExtension.lowercased())
             if let type, type.conforms(to: .image) { return .image }
+            if let type, type.conforms(to: .audio) { return .audio }
             if let type, type.conforms(to: .movie) || type.conforms(to: .audiovisualContent) {
                 return .video
             }
@@ -52,6 +54,7 @@ enum CaptureDraft {
         switch kind {
         case .image: return "Image"
         case .video: return "Video"
+        case .audio: return "Audio"
         case .link: return "Link"
         case .text: return "Text"
         case .arenaChannel: return "Are.na"
@@ -278,6 +281,24 @@ enum ImportService {
             context.insert(block)
             connect(block: block, to: board, context: context)
 
+        case .audio:
+            guard let data = remote.data else { throw ImportError.failed("Empty audio data") }
+            let dest = try MediaLibrary.writeData(data, into: blockID, filename: remote.filename)
+            let meta = await ThumbnailService.videoMetadata(at: dest)
+            let block = Block(
+                id: blockID,
+                kind: .audio,
+                title: remote.title,
+                notes: notes,
+                sourceURL: remote.sourceURL.absoluteString,
+                localRelativePath: MediaLibrary.relativePath(from: dest),
+                mimeType: remote.mimeType,
+                byteSize: Int64(data.count),
+                duration: meta.duration
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+
         case .link:
             let block = Block(
                 kind: .link,
@@ -354,7 +375,8 @@ enum ImportService {
             return
         }
 
-        if let type, type.conforms(to: .movie) || type.conforms(to: .audiovisualContent),
+        if let type, !type.conforms(to: .audio),
+           type.conforms(to: .movie) || type.conforms(to: .audiovisualContent),
            ["mp4", "mov", "m4v", "webm", "avi", "mkv"].contains(url.pathExtension.lowercased())
             || (type.conforms(to: .movie)) {
             let dest = try MediaLibrary.copyFile(url, into: blockID)
@@ -374,6 +396,27 @@ enum ImportService {
                 byteSize: size,
                 width: meta.width,
                 height: meta.height,
+                duration: meta.duration
+            )
+            context.insert(block)
+            connect(block: block, to: board, context: context)
+            return
+        }
+
+        if let type, type.conforms(to: .audio) {
+            let dest = try MediaLibrary.copyFile(url, into: blockID)
+            let meta = await ThumbnailService.videoMetadata(at: dest)
+            let attrs = try FileManager.default.attributesOfItem(atPath: dest.path)
+            let size = attrs[.size] as? Int64 ?? 0
+            let block = Block(
+                id: blockID,
+                kind: .audio,
+                title: url.deletingPathExtension().lastPathComponent,
+                notes: notes,
+                sourceURL: url.absoluteString,
+                localRelativePath: MediaLibrary.relativePath(from: dest),
+                mimeType: type.preferredMIMEType ?? "audio/\(url.pathExtension.lowercased())",
+                byteSize: size,
                 duration: meta.duration
             )
             context.insert(block)

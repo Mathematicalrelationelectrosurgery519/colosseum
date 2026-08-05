@@ -271,7 +271,7 @@ struct BoardLibraryView: View {
             NestedBoardCell(board: nested)
         } else if let block = connection.block {
             switch block.kind {
-            case .image, .video: MediaBlockCell(block: block)
+            case .image, .video, .audio: MediaBlockCell(block: block)
             case .text: TextBlockCell(block: block)
             case .link: LinkBlockCell(block: block)
             case .arenaChannel: ArenaBlockCell(block: block)

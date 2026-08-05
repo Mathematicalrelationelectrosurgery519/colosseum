@@ -70,9 +70,18 @@ struct ArenaContentItem: Sendable, Identifiable, Hashable {
         return false
     }
 
+    var isAudio: Bool {
+        if let mime = attachmentMime?.lowercased(), mime.hasPrefix("audio/") { return true }
+        if let name = attachmentFilename?.lowercased() {
+            let ext = name.split(separator: ".").last.map(String.init) ?? ""
+            return ["mp3", "m4a", "aac", "wav", "aiff", "aif", "flac", "ogg", "opus"].contains(ext)
+        }
+        return false
+    }
+
     /// Best URL for a full remote preview (original image, video file, or link).
     var previewURL: String? {
-        if isVideo { return attachmentURL }
+        if isVideo || isAudio { return attachmentURL }
         if kind == .image || kind == .link || kind == .attachment {
             return imageURL ?? attachmentURL ?? sourceURL
         }

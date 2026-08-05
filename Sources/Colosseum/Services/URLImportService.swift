@@ -3,7 +3,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 struct RemoteMediaResult: Sendable {
-    enum Kind { case image, video, link }
+    enum Kind { case image, video, audio, link }
     let kind: Kind
     let data: Data?
     let filename: String
@@ -57,6 +57,19 @@ enum URLImportService {
             )
         }
 
+        if let mime, mime.hasPrefix("audio/") {
+            let ext = UTType(mimeType: mime)?.preferredFilenameExtension ?? "mp3"
+            let name = suggested.contains(".") ? suggested : "\(suggested).\(ext)"
+            return RemoteMediaResult(
+                kind: .audio,
+                data: data,
+                filename: name,
+                mimeType: mime,
+                title: name,
+                sourceURL: url
+            )
+        }
+
         // Path extension fallback
         let ext = url.pathExtension.lowercased()
         if ["jpg", "jpeg", "png", "gif", "webp", "heic", "tif", "tiff"].contains(ext) {
@@ -75,6 +88,16 @@ enum URLImportService {
                 data: data,
                 filename: suggested.isEmpty ? "video.\(ext)" : suggested,
                 mimeType: mime ?? "video/\(ext)",
+                title: suggested,
+                sourceURL: url
+            )
+        }
+        if ["mp3", "m4a", "aac", "wav", "aiff", "aif", "flac", "ogg", "opus"].contains(ext) {
+            return RemoteMediaResult(
+                kind: .audio,
+                data: data,
+                filename: suggested.isEmpty ? "audio.\(ext)" : suggested,
+                mimeType: mime ?? "audio/\(ext)",
                 title: suggested,
                 sourceURL: url
             )

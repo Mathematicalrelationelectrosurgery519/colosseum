@@ -280,6 +280,7 @@ struct MenuBarCaptureView: View {
         switch kind {
         case .image: return "photo"
         case .video: return "film"
+        case .audio: return "waveform"
         case .link: return "link"
         case .text: return "text.alignleft"
         case .arenaChannel: return "square.grid.2x2"

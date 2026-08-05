@@ -39,8 +39,8 @@ struct ImportArenaSheet: View {
             .disabled(isWorking)
 
             Text(mode == .browse
-                  ? "Preview a public channel in Colosseum — thumbnails stream from Are.na, nothing is downloaded until you save."
-                  : "Download the whole channel into a new local board (images/videos copied to disk).")
+                  ? "Preview a public channel in Colosseum — media streams from Are.na and connected blocks remain remote."
+                  : "Download the whole channel into a new local board (images, video, and audio copied to disk).")
                 .font(.callout)
                 .foregroundStyle(ColosseumTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

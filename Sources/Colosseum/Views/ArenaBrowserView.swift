@@ -770,14 +770,17 @@ struct ArenaBrowserView: View {
     }
 
     private func handleHover(item: ArenaContentItem, hovering: Bool) {
-        guard item.isVideo, let urlString = item.attachmentURL, let url = URL(string: urlString) else {
+        guard (item.isVideo || item.isAudio),
+              let urlString = item.attachmentURL,
+              let url = URL(string: urlString)
+        else {
             if hoveringItemID == item.id { stopHover() }
             return
         }
         if hovering {
             stopHover()
             hoveringItemID = item.id
-            let player = VideoPlayback.looping(url: url, muted: true)
+            let player = VideoPlayback.looping(url: url, muted: item.isVideo)
             hoverVideo = player
             player.play()
         } else if hoveringItemID == item.id {
@@ -875,6 +878,8 @@ struct ArenaRemoteCell: View {
                 if item.isVideo, isHovering, let hoverPlayer {
                     PlayerView(player: hoverPlayer.player, showsControls: false)
                         .allowsHitTesting(false)
+                } else if item.isAudio {
+                    audioCard
                 } else if item.kind == .text {
                     textCard
                 } else if item.kind == .channel {
@@ -897,6 +902,11 @@ struct ArenaRemoteCell: View {
             if item.isVideo, !isHovering {
                 Image(systemName: "play.rectangle")
                     .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(8)
+            } else if item.isAudio {
+                Image(systemName: isHovering ? "speaker.wave.2.fill" : "waveform")
+                    .font(.system(size: isHovering ? 14 : 12))
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(8)
             }
@@ -938,6 +948,22 @@ struct ArenaRemoteCell: View {
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(ColosseumTheme.canvas)
+    }
+
+    private var audioCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "waveform")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(ColosseumTheme.secondaryText)
+            Text(item.displayTitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(ColosseumTheme.primaryText)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ColosseumTheme.surface)
     }
 
     private func placeholder(systemName: String) -> some View {
@@ -1140,6 +1166,22 @@ private struct ArenaRemoteItemView: View {
                             }
                         }
                         .animation(ColosseumMotion.standard, value: loopingPlayer != nil)
+                    } else if item.isAudio {
+                        VStack(spacing: 20) {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 44, weight: .light))
+                                .foregroundStyle(ColosseumTheme.secondaryText)
+                            Text(item.displayTitle)
+                                .font(.title2)
+                                .foregroundStyle(ColosseumTheme.primaryText)
+                                .multilineTextAlignment(.center)
+                            if let loopingPlayer {
+                                PlayerView(player: loopingPlayer.player)
+                                    .frame(maxWidth: 520)
+                                    .frame(height: 64)
+                            }
+                        }
+                        .padding(40)
                     } else if let urlString = item.imageURL ?? item.gridImageURL,
                               let url = URL(string: urlString) {
                         ShimmerRemoteImage(
@@ -1399,7 +1441,10 @@ private struct ArenaRemoteItemView: View {
                 )
 
             VStack(spacing: 0) {
-                metaRow("Content Type", item.isVideo ? "video" : item.typeName.lowercased())
+                metaRow(
+                    "Content Type",
+                    item.isVideo ? "video" : item.isAudio ? "audio" : item.typeName.lowercased()
+                )
                 if item.imageWidth > 0, item.imageHeight > 0 {
                     metaRow("Dimensions", "\(item.imageWidth) × \(item.imageHeight)")
                 }
@@ -1478,7 +1523,11 @@ private struct ArenaRemoteItemView: View {
     private func reloadPlayer() {
         loopingPlayer?.stop()
         loopingPlayer = nil
-        guard let item, item.isVideo, let urlString = item.attachmentURL, let url = URL(string: urlString) else {
+        guard let item,
+              item.isVideo || item.isAudio,
+              let urlString = item.attachmentURL,
+              let url = URL(string: urlString)
+        else {
             return
         }
         let next = VideoPlayback.looping(url: url, muted: false)

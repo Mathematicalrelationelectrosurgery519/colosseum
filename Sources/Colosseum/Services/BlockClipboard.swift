@@ -36,6 +36,14 @@ enum BlockClipboard {
             pb.clearContents()
             return pb.writeObjects([url as NSURL])
 
+        case .audio:
+            guard let url = localFileURL(for: block) else {
+                return copyURLString(block.remoteMediaURL ?? block.sourceURL)
+            }
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            return pb.writeObjects([url as NSURL])
+
         case .link:
             return copyURLString(block.sourceURL)
 
@@ -55,7 +63,7 @@ enum BlockClipboard {
             return copyRemoteImage(item)
 
         case .attachment:
-            if item.isVideo {
+            if item.isVideo || item.isAudio {
                 return copyURLString(item.attachmentURL ?? item.sourceURL)
             }
             return copyRemoteImage(item) || copyURLString(item.attachmentURL ?? item.sourceURL)

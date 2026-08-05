@@ -200,13 +200,13 @@ final class CellVideoSession: ObservableObject {
 
     var player: AVPlayer? { looping?.player }
 
-    func start(url: URL) {
+    func start(url: URL, muted: Bool = true) {
         if let looping {
             looping.play()
             return
         }
         isReady = false
-        let next = VideoPlayback.looping(url: url, muted: true)
+        let next = VideoPlayback.looping(url: url, muted: muted)
         next.onReady = { [weak self] in
             Task { @MainActor in
                 self?.isReady = true

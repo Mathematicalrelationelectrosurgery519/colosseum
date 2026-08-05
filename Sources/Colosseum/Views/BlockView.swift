@@ -255,6 +255,22 @@ struct BlockView: View {
                 PlayerView(player: loopingPlayer.player)
                     .padding(24)
             }
+        case .audio:
+            VStack(spacing: 20) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                Text(block.displayTitle)
+                    .font(.title2)
+                    .foregroundStyle(ColosseumTheme.primaryText)
+                    .multilineTextAlignment(.center)
+                if let loopingPlayer {
+                    PlayerView(player: loopingPlayer.player)
+                        .frame(maxWidth: 520)
+                        .frame(height: 64)
+                }
+            }
+            .padding(40)
         case .text:
             ScrollView {
                 Text(block.textBody)
@@ -516,7 +532,7 @@ struct BlockView: View {
             if block.width > 0, block.height > 0 {
                 metaRow("Dimensions", "\(block.width) × \(block.height)")
             }
-            if block.kind == .video, block.duration > 0 {
+            if (block.kind == .video || block.kind == .audio), block.duration > 0 {
                 metaRow("Duration", ColosseumFormatters.duration(block.duration))
             }
             if block.kind == .arenaChannel {
@@ -685,7 +701,7 @@ struct BlockView: View {
     private func reloadPlayer() {
         loopingPlayer?.stop()
         loopingPlayer = nil
-        guard let block, block.kind == .video else { return }
+        guard let block, block.kind == .video || block.kind == .audio else { return }
         let url: URL?
         if let path = block.localRelativePath {
             url = MediaLibrary.absoluteURL(relativePath: path)

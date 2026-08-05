@@ -18,7 +18,7 @@ Built with Swift, SwiftUI, and SwiftData. Requires **macOS 14+**.
 ## Features
 
 - **Boards** — organize collections; nest boards inside boards
-- **Blocks** — images, video, links, text, and Are.na channel previews
+- **Blocks** — images, video, audio, links, text, and Are.na channel previews
 - **Connections** — attach blocks (and nested boards) to boards with notes and tags
 - **Menu bar capture** — drop URLs, paste images/files, or resolve links without opening the main window
 - **Are.na import** — pull a public Are.na channel into a local board
@@ -54,7 +54,7 @@ Similar board/block vocabulary and you can import Are.na channels, but Colosseum
 In your user Application Support directory under `Colosseum` (SwiftData store + a local Media folder).
 
 **What can I add?**  
-Images, video, links, plain text, and Are.na channel references — via paste, file import, URL resolve, or the menu bar capture UI.
+Images, video, audio, links, plain text, and Are.na channel references — via paste, file import, URL resolve, or the menu bar capture UI.
 
 ## License
 

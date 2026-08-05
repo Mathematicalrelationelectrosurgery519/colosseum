@@ -42,7 +42,7 @@ struct AddContentSheet: View {
                 case .url:
                     TextField("https://… or are.na channel URL", text: $urlText)
                         .textFieldStyle(.roundedBorder)
-                    Text("Pastes images/videos when possible. Are.na channel URLs add a preview card (import a full board from the library).")
+                    Text("Pastes images, video, and audio when possible. Are.na channel URLs add a preview card (import a full board from the library).")
                         .font(.caption)
                         .foregroundStyle(ColosseumTheme.secondaryText)
                 case .note:
