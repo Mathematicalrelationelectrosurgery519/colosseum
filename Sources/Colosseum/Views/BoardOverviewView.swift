@@ -1359,7 +1359,7 @@ struct BoardOverviewView: View {
                 focusedKey: focusedAssignTagKey,
                 onToggle: { toggleAssignTag($0) }
             )
-            .frame(width: max(rect.width, 160), alignment: .leading)
+            .frame(width: 176, alignment: .leading)
         }
         .frame(width: rect.width, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
