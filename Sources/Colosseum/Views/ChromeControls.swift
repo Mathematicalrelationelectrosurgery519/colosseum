@@ -268,6 +268,7 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
     @Binding var tagMatchMode: TagMatchMode
     @Binding var boardsOnly: Bool
     @Binding var uncategorizedOnly: Bool
+    var flattened: Binding<Bool>? = nil
     var showTagMode = false
     var showBoardsFilter = true
     var showUncategorizedFilter = true
@@ -282,6 +283,9 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
                 }
                 if showUncategorizedFilter {
                     UncategorizedFilterIcon(isActive: $uncategorizedOnly)
+                }
+                if let flattened {
+                    FlattenToggleIcon(isActive: flattened)
                 }
                 if showBoardsFilter {
                     BoardsOnlyFilterIcon(isActive: $boardsOnly)
@@ -298,6 +302,25 @@ struct ColosseumColumnSliderToolbar: ToolbarContent {
             .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
         }
         .colosseumPlainToolbarItem()
+    }
+}
+
+struct FlattenToggleIcon: View {
+    @Binding var isActive: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(ColosseumMotion.soft) { isActive.toggle() }
+        } label: {
+            Image(systemName: isActive ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isActive ? ColosseumTheme.primaryText : ColosseumTheme.secondaryText)
+                .frame(width: ChromeMetrics.iconButtonWidth, height: ChromeMetrics.controlHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isActive ? "Show child boards" : "Flatten child boards")
+        .pointingHandCursor()
     }
 }
 

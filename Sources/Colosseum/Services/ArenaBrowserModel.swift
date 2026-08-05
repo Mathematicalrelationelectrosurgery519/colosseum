@@ -95,6 +95,17 @@ final class ArenaBrowserModel {
         load(ArenaBrowseTarget(slug: channel.slug, title: channel.title, urlString: channel.url.absoluteString))
     }
 
+    func loadAllRemaining() async {
+        while hasMore, !Task.isCancelled {
+            do {
+                try await fetchNextPage(reset: false)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+    }
+
     private func fetchNextPage(reset: Bool) async throws {
         guard let channel else { return }
         if reset {

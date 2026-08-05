@@ -3,6 +3,13 @@ import AVFoundation
 import SwiftData
 import SwiftUI
 
+private struct ArenaGridEntry: Identifiable {
+    let item: ArenaContentItem
+    let source: ArenaBrowseTarget
+
+    var id: String { "\(source.slug):\(item.id)" }
+}
+
 struct ArenaBrowserView: View {
     let initialTarget: ArenaBrowseTarget
     @Binding var stack: [ArenaBrowseTarget]
@@ -12,6 +19,8 @@ struct ArenaBrowserView: View {
     var showsInlineChrome: Bool = true
     /// Shared with host toolbar when chrome is external; otherwise uses local state.
     var boardsOnly: Binding<Bool>? = nil
+    /// Shared with host toolbar when chrome is external; otherwise uses local state.
+    var flattened: Binding<Bool>? = nil
     /// Shared with host principal search when chrome is external.
     var searchActive: Binding<Bool>? = nil
     var searchQuery: Binding<String>? = nil
@@ -21,13 +30,14 @@ struct ArenaBrowserView: View {
     @Environment(\.modelContext) private var context
     @State private var model = ArenaBrowserModel()
     @State private var selectedItem: ArenaContentItem?
+    @State private var selectedItemSiblings: [ArenaContentItem] = []
     @State private var showConnect = false
     @State private var isImporting = false
     @State private var importProgress = ""
     @State private var statusMessage: String?
     @State private var hoverVideo: LoopingVideoPlayer?
     @State private var hoveringItemID: Int?
-    @State private var gridFocusID: Int?
+    @State private var gridFocusID: String?
     @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var focused: Bool
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
@@ -38,8 +48,11 @@ struct ArenaBrowserView: View {
     @State private var pinchDidChange = false
     @State private var suppressGridClicksUntil: Date?
     @State private var localBoardsOnly = false
+    @State private var localFlattened = false
     @State private var localSearchActive = false
     @State private var localSearchQuery = ""
+    @State private var flattenedContents: [String: [ArenaContentItem]] = [:]
+    @State private var isLoadingFlattenedContents = false
 
     private var isBrowsingGrid: Bool { selectedItem == nil && !showBoardSearch }
 
@@ -92,29 +105,64 @@ struct ArenaBrowserView: View {
         )
     }
 
-    private var displayedItems: [ArenaContentItem] {
-        var result = model.items
+    private var flattenedActive: Binding<Bool> {
+        Binding(
+            get: { flattened?.wrappedValue ?? localFlattened },
+            set: { newValue in
+                if let flattened {
+                    flattened.wrappedValue = newValue
+                } else {
+                    localFlattened = newValue
+                }
+            }
+        )
+    }
+
+    private var gridEntries: [ArenaGridEntry] {
+        model.items.flatMap { item -> [ArenaGridEntry] in
+            guard flattenedActive.wrappedValue,
+                  item.kind == .channel,
+                  let slug = item.channelSlug,
+                  let contents = flattenedContents[slug]
+            else {
+                return [ArenaGridEntry(item: item, source: currentTarget)]
+            }
+            let source = ArenaBrowseTarget(slug: slug, title: item.title, urlString: item.previewURL)
+            return contents.map { ArenaGridEntry(item: $0, source: source) }
+        }
+    }
+
+    private var displayedEntries: [ArenaGridEntry] {
+        var result = gridEntries
         if boardsOnlyActive.wrappedValue {
-            result = result.filter { $0.kind == .channel }
+            result = result.filter { $0.item.kind == .channel }
         }
         let query = boardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if showBoardSearch, !query.isEmpty {
             result = result.filter {
-                BoardContentSearch.matches([$0.title, $0.notes], query: query)
+                BoardContentSearch.matches([$0.item.title, $0.item.notes], query: query)
             }
         }
         return result
     }
 
     /// Cheap token for focus invalidation (avoids `map(\.id)` allocations).
-    private var displayedListIdentity: GridListIdentity<Int> {
+    private var displayedListIdentity: GridListIdentity<String> {
         var hasher = Hasher()
         hasher.combine(model.items.count)
         hasher.combine(boardsOnlyActive.wrappedValue)
         hasher.combine(showBoardSearch)
         hasher.combine(boardSearchQuery)
-        return GridListIdentities.arenaItems(
-            displayedItems,
+        hasher.combine(flattenedActive.wrappedValue)
+        hasher.combine(flattenedContents.count)
+        for slug in flattenedContents.keys.sorted() {
+            hasher.combine(slug)
+            hasher.combine(flattenedContents[slug]?.count ?? 0)
+        }
+        return GridListIdentity(
+            count: displayedEntries.count,
+            firstID: displayedEntries.first?.id,
+            lastID: displayedEntries.last?.id,
             revision: UInt64(bitPattern: Int64(hasher.finalize()))
         )
     }
@@ -162,7 +210,7 @@ struct ArenaBrowserView: View {
 
             if selectedItem != nil {
                 ArenaRemoteItemView(
-                    items: model.items.filter { $0.kind != .channel },
+                    items: selectedItemSiblings,
                     selected: $selectedItem,
                     destinationBoard: destinationBoard,
                     onClose: {
@@ -218,20 +266,35 @@ struct ArenaBrowserView: View {
             stopHover()
             selectedItem = nil
             model.load(last)
+            flattenedContents = [:]
             gridFocusID = nil
             activateFocus()
         }
         .onChange(of: displayedListIdentity) { _, _ in
             gridFocusID = GridListIdentity.revalidatedFocus(
                 gridFocusID,
-                in: displayedItems.lazy.map(\.id)
+                in: displayedEntries.lazy.map(\.id)
             )
         }
         .onChange(of: boardsOnlyActive.wrappedValue) { _, _ in
             gridFocusID = GridListIdentity.revalidatedFocus(
                 gridFocusID,
-                in: displayedItems.lazy.map(\.id)
+                in: displayedEntries.lazy.map(\.id)
             )
+        }
+        .onChange(of: flattenedActive.wrappedValue) { _, isFlattened in
+            gridFocusID = GridListIdentity.revalidatedFocus(
+                gridFocusID,
+                in: displayedEntries.lazy.map(\.id)
+            )
+            if isFlattened {
+                Task { await loadFlattenedContents() }
+            }
+        }
+        .onChange(of: model.isLoading) { _, isLoading in
+            if !isLoading, flattenedActive.wrappedValue {
+                Task { await loadFlattenedContents() }
+            }
         }
         .onExitCommand(perform: handleEscape)
         .onKeyPress(.escape) {
@@ -252,6 +315,12 @@ struct ArenaBrowserView: View {
                     }
                 }
                 .keyboardShortcut("n", modifiers: [])
+                Button("") {
+                    withAnimation(ColosseumMotion.soft) {
+                        flattenedActive.wrappedValue.toggle()
+                    }
+                }
+                .keyboardShortcut("f", modifiers: [])
                 Button("", action: handleEscape)
                     .keyboardShortcut(.cancelAction)
             }
@@ -277,6 +346,16 @@ struct ArenaBrowserView: View {
                     .background(ColosseumTheme.elevated)
                     .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
                     .padding(.bottom, 20)
+            }
+            if isLoadingFlattenedContents {
+                Text("Flattening child boards…")
+                    .font(.caption)
+                    .foregroundStyle(ColosseumTheme.secondaryText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(ColosseumTheme.elevated)
+                    .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+                    .padding(.bottom, statusMessage == nil ? 20 : 54)
             }
         }
         .highPriorityGesture(columnPinchGesture)
@@ -314,6 +393,7 @@ struct ArenaBrowserView: View {
                 if selectedItem == nil {
                     HStack(alignment: .center, spacing: 10) {
                         BoardsOnlyFilterIcon(isActive: boardsOnlyActive)
+                        FlattenToggleIcon(isActive: flattenedActive)
                         ColumnDensityControl(columnCount: $columnCount)
                     }
                 }
@@ -378,7 +458,7 @@ struct ArenaBrowserView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if showBoardSearch,
                   !boardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  displayedItems.isEmpty {
+                  displayedEntries.isEmpty {
             Text("no results")
                 .font(.system(size: 13))
                 .foregroundStyle(ColosseumTheme.tertiaryText)
@@ -387,17 +467,18 @@ struct ArenaBrowserView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-                        ForEach(displayedItems) { item in
+                        ForEach(displayedEntries) { entry in
+                            let item = entry.item
                             Button {
                                 guard !shouldSuppressGridClicks else { return }
-                                gridFocusID = item.id
-                                open(item)
+                                gridFocusID = entry.id
+                                open(entry)
                             } label: {
                                 GridBlockChrome(
                                     notes: item.notes,
                                     title: item.title,
                                     searchQuery: showBoardSearch ? boardSearchQuery : "",
-                                    isSelected: item.id == gridFocusID && isBrowsingGrid,
+                                    isSelected: entry.id == gridFocusID && isBrowsingGrid,
                                     showsNotes: showGridNotes
                                 ) {
                                     ArenaRemoteCell(
@@ -408,7 +489,7 @@ struct ArenaBrowserView: View {
                                 }
                             }
                             .buttonStyle(.plain)
-                            .id(item.id)
+                            .id(entry.id)
                             .pointingHandCursor()
                             .onHover { hovering in
                                 handleHover(item: item, hovering: hovering)
@@ -428,7 +509,7 @@ struct ArenaBrowserView: View {
                                     }
                                 }
                                 if item.kind == .channel {
-                                    Button("Browse Channel") { open(item) }
+                                    Button("Browse Channel") { open(entry) }
                                 }
                                 if let urlString = item.previewURL ?? item.sourceURL,
                                    let url = URL(string: urlString) {
@@ -469,7 +550,7 @@ struct ArenaBrowserView: View {
         DispatchQueue.main.async {
             focused = true
             if gridFocusID == nil {
-                gridFocusID = displayedItems.first?.id
+                gridFocusID = displayedEntries.first?.id
             }
         }
     }
@@ -517,6 +598,14 @@ struct ArenaBrowserView: View {
                 }
                 return true
             }
+            if char == "f" {
+                DispatchQueue.main.async {
+                    withAnimation(ColosseumMotion.soft) {
+                        flattenedActive.wrappedValue.toggle()
+                    }
+                }
+                return true
+            }
             return false
         }
         // Ignore arrows/enter while searching or in item detail; Esc still routes here
@@ -546,14 +635,14 @@ struct ArenaBrowserView: View {
     @discardableResult
     private func copyFocusedItem() -> Bool {
         guard let focusID = gridFocusID,
-              let item = displayedItems.first(where: { $0.id == focusID })
+              let item = displayedEntries.first(where: { $0.id == focusID })?.item
         else { return false }
         return BlockClipboard.copy(item)
     }
 
     private func moveGridFocus(delta: Int) {
         guard isBrowsingGrid else { return }
-        let items = displayedItems
+        let items = displayedEntries
         guard !items.isEmpty else { return }
         focused = true
         if let idx = items.firstIndex(where: { $0.id == gridFocusID }) {
@@ -571,22 +660,53 @@ struct ArenaBrowserView: View {
 
     private func activateFocusedItem() {
         guard isBrowsingGrid else { return }
-        let items = displayedItems
+        let items = displayedEntries
         let target = items.first(where: { $0.id == gridFocusID }) ?? items.first
-        guard let item = target else { return }
-        gridFocusID = item.id
-        open(item)
+        guard let entry = target else { return }
+        gridFocusID = entry.id
+        open(entry)
     }
 
-    private func open(_ item: ArenaContentItem) {
+    private func open(_ entry: ArenaGridEntry) {
+        let item = entry.item
         if item.kind == .channel, let slug = item.channelSlug {
             withAnimation(ColosseumMotion.soft) {
                 push(ArenaBrowseTarget(slug: slug, title: item.title, urlString: item.previewURL))
             }
             return
         }
+        selectedItemSiblings = siblingItems(for: entry)
         withAnimation(ColosseumMotion.overlay) {
             selectedItem = item
+        }
+    }
+
+    private func siblingItems(for entry: ArenaGridEntry) -> [ArenaContentItem] {
+        let sourceItems = entry.source.slug == currentTarget.slug
+            ? model.items
+            : flattenedContents[entry.source.slug] ?? []
+        return sourceItems.filter { $0.kind != .channel }
+    }
+
+    @MainActor
+    private func loadFlattenedContents() async {
+        guard flattenedActive.wrappedValue, !isLoadingFlattenedContents else { return }
+        let targetSlug = currentTarget.slug
+        isLoadingFlattenedContents = true
+        defer { isLoadingFlattenedContents = false }
+
+        await model.loadAllRemaining()
+        guard currentTarget.slug == targetSlug, flattenedActive.wrappedValue else { return }
+
+        let channels = model.items.compactMap { item -> (String, ArenaContentItem)? in
+            guard item.kind == .channel, let slug = item.channelSlug else { return nil }
+            return (slug, item)
+        }
+        for (slug, _) in channels where flattenedContents[slug] == nil {
+            guard currentTarget.slug == targetSlug, flattenedActive.wrappedValue else { return }
+            if let contents = try? await ArenaService.fetchAllContents(slug: slug) {
+                flattenedContents[slug] = contents
+            }
         }
     }
 
