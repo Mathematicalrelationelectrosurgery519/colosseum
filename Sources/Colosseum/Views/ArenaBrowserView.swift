@@ -10,6 +10,11 @@ private struct ArenaGridEntry: Identifiable {
     var id: String { "\(source.slug):\(item.id)" }
 }
 
+private struct ArenaReturnSelection {
+    let item: ArenaContentItem
+    let siblings: [ArenaContentItem]
+}
+
 struct ArenaBrowserView: View {
     let initialTarget: ArenaBrowseTarget
     @Binding var stack: [ArenaBrowseTarget]
@@ -55,6 +60,7 @@ struct ArenaBrowserView: View {
     @State private var localSearchQuery = ""
     @State private var flattenedContents: [String: [ArenaContentItem]] = [:]
     @State private var isLoadingFlattenedContents = false
+    @State private var returnSelections: [Int: ArenaReturnSelection] = [:]
 
     private var isBrowsingGrid: Bool { selectedItem == nil && !showBoardSearch }
 
@@ -222,6 +228,12 @@ struct ArenaBrowserView: View {
                         activateFocus()
                     },
                     onBrowseBoard: { target in
+                        if let selectedItem {
+                            returnSelections[max(0, stack.count - 1)] = ArenaReturnSelection(
+                                item: selectedItem,
+                                siblings: selectedItemSiblings
+                            )
+                        }
                         withAnimation(ColosseumMotion.overlay) {
                             push(target)
                             selectedItem = nil
@@ -269,14 +281,21 @@ struct ArenaBrowserView: View {
                 installKeyMonitor()
             }
         }
-        .onChange(of: stack) { _, newStack in
+        .onChange(of: stack) { oldStack, newStack in
             guard let last = newStack.last else { return }
             stopHover()
-            selectedItem = nil
+            let returnSelection = returnSelections.removeValue(forKey: newStack.count - 1)
+            if newStack.count < oldStack.count {
+                returnSelections = returnSelections.filter { $0.key < newStack.count }
+            }
+            selectedItem = returnSelection?.item
+            selectedItemSiblings = returnSelection?.siblings ?? []
             model.load(last)
             flattenedContents = [:]
             gridFocusID = nil
-            activateFocus()
+            if returnSelection == nil {
+                activateFocus()
+            }
         }
         .onChange(of: displayedListIdentity) { _, _ in
             gridFocusID = GridListIdentity.revalidatedFocus(

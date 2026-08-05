@@ -20,6 +20,7 @@ private enum FlattenedBoardEntry: Identifiable {
 struct BoardOverviewView: View {
     @Bindable var board: Board
     @Binding var path: [UUID]
+    @Binding var returnPreviewConnections: [UUID: UUID]
     var initialConnectionID: UUID? = nil
     var onInitialConnectionConsumed: () -> Void = {}
 
@@ -962,11 +963,14 @@ struct BoardOverviewView: View {
     private func openFlattenedRemoteBoard(
         _ target: ArenaBrowseTarget,
         selectedItem: ArenaContentItem?,
-        siblings: [ArenaContentItem]
+        siblings: [ArenaContentItem],
+        preservesLocalPreview: Bool = false
     ) {
         withAnimation(ColosseumMotion.overlay) {
-            flattenedSelectedBoardID = nil
-            flattenedSelectedConnectionID = nil
+            if !preservesLocalPreview {
+                flattenedSelectedBoardID = nil
+                flattenedSelectedConnectionID = nil
+            }
             showBoardSearch = false
             boardSearchQuery = ""
             arenaInitialSelectedItem = selectedItem
@@ -1051,19 +1055,28 @@ struct BoardOverviewView: View {
     }
 
     private func openInitialConnectionIfNeeded() {
-        guard let initialConnectionID,
-              let connection = connections.first(where: { $0.id == initialConnectionID })
+        let connectionID: UUID?
+        if let initialConnectionID {
+            connectionID = initialConnectionID
+            onInitialConnectionConsumed()
+        } else {
+            connectionID = returnPreviewConnections.removeValue(forKey: board.id)
+        }
+        guard let connectionID,
+              let connection = connections.first(where: { $0.id == connectionID })
         else { return }
-        onInitialConnectionConsumed()
         DispatchQueue.main.async {
             openConnection(connection)
         }
     }
 
     private func openConnectedBoard(_ target: Board) {
+        guard target.id != board.id else { return }
+        if let selectedConnectionID {
+            returnPreviewConnections[board.id] = selectedConnectionID
+        }
         withAnimation(ColosseumMotion.overlay) {
             selectedConnectionID = nil
-            if target.id == board.id { return }
             if let idx = path.firstIndex(of: target.id) {
                 path = Array(path.prefix(idx + 1))
             } else {
@@ -1098,7 +1111,6 @@ struct BoardOverviewView: View {
                     onOpenBoard: openConnectedBoard(_:),
                     onOpenRemoteBoard: { target in
                         withAnimation(ColosseumMotion.overlay) {
-                            selectedConnectionID = nil
                             boardsOnly = false
                             arenaStack = [target]
                             arenaBrowseTarget = target
@@ -1124,8 +1136,12 @@ struct BoardOverviewView: View {
                     onClose: closeFlattenedPreview,
                     onOpenBoard: openConnectedBoard(_:),
                     onOpenRemoteBoard: { target in
-                        closeFlattenedPreview()
-                        openFlattenedRemoteBoard(target, selectedItem: nil, siblings: [])
+                        openFlattenedRemoteBoard(
+                            target,
+                            selectedItem: nil,
+                            siblings: [],
+                            preservesLocalPreview: true
+                        )
                     }
                 )
                 .transition(ColosseumMotion.overlayTransition)

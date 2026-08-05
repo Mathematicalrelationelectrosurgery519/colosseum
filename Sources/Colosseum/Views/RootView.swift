@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
     @State private var arenaStack: [ArenaBrowseTarget] = []
     @State private var pendingConnectionID: UUID?
+    @State private var returnPreviewConnections: [UUID: UUID] = [:]
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
 
     var body: some View {
@@ -34,6 +35,7 @@ struct RootView: View {
                         BoardRouteView(
                             boardID: boardID,
                             path: $path,
+                            returnPreviewConnections: $returnPreviewConnections,
                             initialConnectionID: pendingConnectionID,
                             onInitialConnectionConsumed: { pendingConnectionID = nil }
                         )
@@ -53,9 +55,7 @@ struct RootView: View {
                     ToolbarItem(placement: .navigation) {
                         AppHomeButton {
                             guard !path.isEmpty else { return }
-                            withAnimation(ColosseumMotion.overlay) {
-                                path = []
-                            }
+                            goHome()
                         }
                         .frame(height: ChromeMetrics.controlHeight)
                     }
@@ -121,7 +121,7 @@ struct RootView: View {
             showImportArena = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumGoHome)) { _ in
-            withAnimation(ColosseumMotion.overlay) { path = [] }
+            goHome()
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
             guard path.isEmpty else { return }
@@ -135,9 +135,16 @@ struct RootView: View {
 
     private func openBoard(_ id: UUID) {
         pendingConnectionID = nil
+        returnPreviewConnections = [:]
         withAnimation(ColosseumMotion.overlay) {
             path = [id]
         }
+    }
+
+    private func goHome() {
+        pendingConnectionID = nil
+        returnPreviewConnections = [:]
+        withAnimation(ColosseumMotion.overlay) { path = [] }
     }
 
     private func openFlattenedConnection(source: Board, connection: Connection) {
@@ -155,6 +162,7 @@ struct RootView: View {
     }
 
     private func deleteBoard(_ board: Board) {
+        returnPreviewConnections.removeValue(forKey: board.id)
         let outgoing = Array(board.connections)
         let incoming = Array(board.nestedIn)
         let orphanedBlocks = Dictionary(

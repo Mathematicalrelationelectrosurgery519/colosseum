@@ -4,6 +4,7 @@ import SwiftUI
 struct BoardRouteView: View {
     let boardID: UUID
     @Binding var path: [UUID]
+    @Binding var returnPreviewConnections: [UUID: UUID]
     let initialConnectionID: UUID?
     var onInitialConnectionConsumed: () -> Void
     @Query private var boards: [Board]
@@ -11,11 +12,13 @@ struct BoardRouteView: View {
     init(
         boardID: UUID,
         path: Binding<[UUID]>,
+        returnPreviewConnections: Binding<[UUID: UUID]>,
         initialConnectionID: UUID? = nil,
         onInitialConnectionConsumed: @escaping () -> Void = {}
     ) {
         self.boardID = boardID
         self._path = path
+        self._returnPreviewConnections = returnPreviewConnections
         self.initialConnectionID = initialConnectionID
         self.onInitialConnectionConsumed = onInitialConnectionConsumed
         let id = boardID
@@ -27,6 +30,7 @@ struct BoardRouteView: View {
             BoardOverviewView(
                 board: board,
                 path: $path,
+                returnPreviewConnections: $returnPreviewConnections,
                 initialConnectionID: initialConnectionID,
                 onInitialConnectionConsumed: onInitialConnectionConsumed
             )
