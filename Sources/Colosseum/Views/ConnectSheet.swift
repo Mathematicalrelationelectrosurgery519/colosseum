@@ -344,6 +344,7 @@ struct ConnectSheet: View {
                 return existing.kind == .arenaChannel
                     && existing.arenaSlug == remoteItem.channelSlug
             }
+            if existing.arenaBlockID == remoteItem.id { return true }
             let remoteURLs = [
                 remoteItem.sourceURL,
                 remoteItem.imageURL,

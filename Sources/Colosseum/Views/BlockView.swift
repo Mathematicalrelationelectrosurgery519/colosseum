@@ -10,6 +10,7 @@ struct BlockView: View {
     var onClose: () -> Void
     var onTagTap: (String) -> Void = { _ in }
     var onOpenBoard: (Board) -> Void = { _ in }
+    var onOpenRemoteBoard: (ArenaBrowseTarget) -> Void = { _ in }
 
     @Environment(\.modelContext) private var context
 
@@ -20,6 +21,9 @@ struct BlockView: View {
     @State private var notesFocusNonce = 0
     /// Index into `boardConnections`; `nil` until ↑/↓ is used.
     @State private var connectionFocusIndex: Int?
+    @State private var remoteConnections: [ArenaRemoteConnection] = []
+    @State private var isLoadingRemoteConnections = false
+    @State private var remoteConnectionsError: String?
     @FocusState private var focused: Bool
 
     private var index: Int {
@@ -42,6 +46,21 @@ struct BlockView: View {
                 guard let parent = conn.board else { return nil }
                 return (conn, parent)
             }
+    }
+
+    private var connectionCount: Int {
+        boardConnections.count + remoteConnections.count
+    }
+
+    private var focusedConnectionScrollID: String? {
+        guard let connectionFocusIndex else { return nil }
+        let local = boardConnections
+        if local.indices.contains(connectionFocusIndex) {
+            return "local-\(local[connectionFocusIndex].connection.id.uuidString)"
+        }
+        let remoteIndex = connectionFocusIndex - local.count
+        guard remoteConnections.indices.contains(remoteIndex) else { return nil }
+        return "remote-\(remoteConnections[remoteIndex].id)"
     }
 
     var body: some View {
@@ -78,6 +97,7 @@ struct BlockView: View {
             focused = true
             reloadPlayer()
             installKeyMonitor()
+            Task { await loadRemoteConnections() }
         }
         .onDisappear {
             keyMonitor.remove()
@@ -89,6 +109,7 @@ struct BlockView: View {
             showMeta = false
             connectionFocusIndex = nil
             reloadPlayer()
+            Task { await loadRemoteConnections() }
         }
         .onChange(of: showConnect) { _, _ in
             installKeyMonitor()
@@ -222,6 +243,12 @@ struct BlockView: View {
                         .scaledToFit()
                         .padding(24)
                 }
+            } else if let urlString = block.remoteMediaURL ?? block.remoteThumbnailURL,
+                      let url = URL(string: urlString) {
+                ShimmerRemoteImage(url: url, square: false, contentPadding: 24) {
+                    remoteMediaPlaceholder("Couldn’t load image")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         case .video:
             if let loopingPlayer {
@@ -277,8 +304,9 @@ struct BlockView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let block {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
                         notesSection(for: block)
 
                         if block.kind == .text {
@@ -305,15 +333,22 @@ struct BlockView: View {
                             }
                             .zIndex(2)
 
-                        Text("Connections \(block.connections.count)")
+                            Text("Connections \(connectionCount)")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(ColosseumTheme.secondaryText)
                             .padding(.top, 8)
 
-                        connectionsList()
+                            connectionsList()
+                        }
+                        .padding(16)
+                        .padding(.bottom, 24)
                     }
-                    .padding(16)
-                    .padding(.bottom, 24)
+                    .onChange(of: focusedConnectionScrollID) { _, id in
+                        guard let id else { return }
+                        withAnimation(ColosseumMotion.soft) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
                 }
             }
 
@@ -363,6 +398,19 @@ struct BlockView: View {
 
             if block.kind == .arenaChannel,
                let urlString = block.arenaURL ?? block.sourceURL,
+               let url = URL(string: urlString) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "arrow.up.right")
+                }
+                .buttonStyle(ChromeIconButtonStyle())
+                .help("Open on Are.na")
+                .pointingHandCursor()
+            }
+
+            if block.kind != .arenaChannel,
+               let urlString = block.arenaURL,
                let url = URL(string: urlString) {
                 Button {
                     NSWorkspace.shared.open(url)
@@ -477,6 +525,9 @@ struct BlockView: View {
                     metaRow("By", owner)
                 }
             }
+            if let typeName = block.arenaTypeName {
+                metaRow("Are.na Type", typeName)
+            }
             if let source = block.sourceURL, !source.isEmpty {
                 metaRow("Source", source)
             }
@@ -505,9 +556,9 @@ struct BlockView: View {
     }
 
     private func connectionsList() -> some View {
-        let items = boardConnections
+        let localItems = boardConnections
         return VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.element.connection.id) { index, item in
+            ForEach(Array(localItems.enumerated()), id: \.element.connection.id) { index, item in
                 let isFocused = connectionFocusIndex == index
                 Button {
                     connectionFocusIndex = index
@@ -534,10 +585,62 @@ struct BlockView: View {
                 }
                 .buttonStyle(.plain)
                 .pointingHandCursor()
+                .id("local-\(item.connection.id.uuidString)")
                 .animation(ColosseumMotion.soft, value: isFocused)
             }
 
-            if items.isEmpty {
+            ForEach(Array(remoteConnections.enumerated()), id: \.element.id) { index, connection in
+                let focusIndex = localItems.count + index
+                let isFocused = connectionFocusIndex == focusIndex
+                Button {
+                    connectionFocusIndex = focusIndex
+                    browseRemoteConnection(connection)
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(connection.title)
+                                .foregroundStyle(
+                                    isFocused
+                                        ? ColosseumTheme.remoteBoardTitle
+                                        : ColosseumTheme.remoteBoardTitle.opacity(0.75)
+                                )
+                                .fontWeight(isFocused ? .medium : .regular)
+                                .multilineTextAlignment(.leading)
+                            Text(
+                                [
+                                    "\(connection.blockCount)",
+                                    connection.updatedAt.map(ColosseumFormatters.relativeDate)
+                                ]
+                                .compactMap { $0 }
+                                .joined(separator: " · ")
+                            )
+                            .font(.caption)
+                            .foregroundStyle(ColosseumTheme.tertiaryText)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(isFocused ? Color.white.opacity(0.08) : Color.clear)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .pointingHandCursor()
+                .id("remote-\(connection.id)")
+                .animation(ColosseumMotion.soft, value: isFocused)
+            }
+
+            if isLoadingRemoteConnections && remoteConnections.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.top, 8)
+            } else if let remoteConnectionsError, localItems.isEmpty && remoteConnections.isEmpty {
+                Text(remoteConnectionsError)
+                    .font(.caption)
+                    .foregroundStyle(ColosseumTheme.tertiaryText)
+                    .padding(.top, 8)
+            } else if localItems.isEmpty && remoteConnections.isEmpty {
                 Text("Not connected to any boards.")
                     .font(.caption)
                     .foregroundStyle(ColosseumTheme.tertiaryText)
@@ -548,22 +651,25 @@ struct BlockView: View {
     }
 
     private func moveConnectionFocus(_ delta: Int) {
-        let items = boardConnections
-        guard !items.isEmpty else { return }
+        guard connectionCount > 0 else { return }
         if let current = connectionFocusIndex {
-            connectionFocusIndex = max(0, min(items.count - 1, current + delta))
+            connectionFocusIndex = max(0, min(connectionCount - 1, current + delta))
         } else {
-            connectionFocusIndex = delta > 0 ? 0 : items.count - 1
+            connectionFocusIndex = delta > 0 ? 0 : connectionCount - 1
         }
         focused = true
     }
 
     private func activateFocusedBoardConnection() {
-        let items = boardConnections
-        guard let connectionFocusIndex,
-              items.indices.contains(connectionFocusIndex)
-        else { return }
-        onOpenBoard(items[connectionFocusIndex].board)
+        guard let connectionFocusIndex else { return }
+        let localItems = boardConnections
+        if localItems.indices.contains(connectionFocusIndex) {
+            onOpenBoard(localItems[connectionFocusIndex].board)
+            return
+        }
+        let remoteIndex = connectionFocusIndex - localItems.count
+        guard remoteConnections.indices.contains(remoteIndex) else { return }
+        browseRemoteConnection(remoteConnections[remoteIndex])
     }
 
     private func step(_ delta: Int) {
@@ -579,10 +685,53 @@ struct BlockView: View {
     private func reloadPlayer() {
         loopingPlayer?.stop()
         loopingPlayer = nil
-        guard let block, block.kind == .video, let path = block.localRelativePath else { return }
-        let url = MediaLibrary.absoluteURL(relativePath: path)
+        guard let block, block.kind == .video else { return }
+        let url: URL?
+        if let path = block.localRelativePath {
+            url = MediaLibrary.absoluteURL(relativePath: path)
+        } else if let urlString = block.remoteMediaURL {
+            url = URL(string: urlString)
+        } else {
+            url = nil
+        }
+        guard let url else { return }
         let next = VideoPlayback.looping(url: url, muted: false)
         loopingPlayer = next
         next.play()
+    }
+
+    private func browseRemoteConnection(_ connection: ArenaRemoteConnection) {
+        onOpenRemoteBoard(ArenaBrowseTarget(
+            slug: connection.slug,
+            title: connection.title,
+            urlString: connection.arenaURLString
+        ))
+    }
+
+    private func remoteMediaPlaceholder(_ title: String) -> some View {
+        Text(title)
+            .foregroundStyle(ColosseumTheme.secondaryText)
+    }
+
+    @MainActor
+    private func loadRemoteConnections() async {
+        guard let block, block.arenaBlockID != nil || block.kind == .arenaChannel else {
+            remoteConnections = []
+            remoteConnectionsError = nil
+            return
+        }
+        let blockID = block.id
+        isLoadingRemoteConnections = true
+        remoteConnectionsError = nil
+        defer { isLoadingRemoteConnections = false }
+        do {
+            let connections = try await ArenaService.fetchConnections(for: block)
+            guard self.block?.id == blockID else { return }
+            remoteConnections = connections
+        } catch {
+            guard self.block?.id == blockID else { return }
+            remoteConnections = []
+            remoteConnectionsError = error.localizedDescription
+        }
     }
 }

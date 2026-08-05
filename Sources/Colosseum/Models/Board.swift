@@ -54,7 +54,9 @@ final class Board {
         seen.insert(board.id)
         return board.connections.reduce(into: Int64(0)) { total, connection in
             if let block = connection.block {
-                total += max(block.byteSize, 0)
+                if block.localRelativePath != nil {
+                    total += max(block.byteSize, 0)
+                }
             } else if let nested = connection.nestedBoard {
                 total += computeStorageBytes(board: nested, visited: seen)
             }

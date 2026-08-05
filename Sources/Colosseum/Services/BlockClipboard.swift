@@ -11,7 +11,9 @@ enum BlockClipboard {
             return copyText(block.textBody)
 
         case .image:
-            guard let url = localFileURL(for: block) else { return false }
+            guard let url = localFileURL(for: block) else {
+                return copyURLString(block.remoteMediaURL ?? block.sourceURL)
+            }
             let pb = NSPasteboard.general
             pb.clearContents()
             // Write raw GIF bytes first so paste destinations keep animation.
@@ -27,7 +29,9 @@ enum BlockClipboard {
             return pb.writeObjects(items)
 
         case .video:
-            guard let url = localFileURL(for: block) else { return false }
+            guard let url = localFileURL(for: block) else {
+                return copyURLString(block.remoteMediaURL ?? block.sourceURL)
+            }
             let pb = NSPasteboard.general
             pb.clearContents()
             return pb.writeObjects([url as NSURL])

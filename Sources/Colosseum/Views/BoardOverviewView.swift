@@ -774,7 +774,15 @@ struct BoardOverviewView: View {
                             selectOnlyTag(tag)
                         }
                     },
-                    onOpenBoard: openConnectedBoard(_:)
+                    onOpenBoard: openConnectedBoard(_:),
+                    onOpenRemoteBoard: { target in
+                        withAnimation(ColosseumMotion.overlay) {
+                            selectedConnectionID = nil
+                            boardsOnly = false
+                            arenaStack = [target]
+                            arenaBrowseTarget = target
+                        }
+                    }
                 )
                 .transition(ColosseumMotion.overlayTransition)
                 .zIndex(10)

@@ -57,15 +57,88 @@ enum ArenaImportService {
         return board
     }
 
-    /// Saves a single remote Are.na item into a local board (downloads media when needed).
+    /// Connects a single remote Are.na item as a reference without downloading its media.
     static func saveItem(
         _ item: ArenaContentItem,
         into board: Board,
         context: ModelContext
     ) async throws {
-        try await importItem(item, into: board, channelURL: URL(string: "https://www.are.na")!, context: context)
+        let block = existingBlock(for: item, context: context) ?? makeRemoteReference(for: item)
+        if block.modelContext == nil {
+            context.insert(block)
+        }
+        ImportService.connect(block: block, to: board, context: context)
         board.updatedAt = .now
         try context.save()
+    }
+
+    private static func existingBlock(for item: ArenaContentItem, context: ModelContext) -> Block? {
+        let blocks = (try? context.fetch(FetchDescriptor<Block>())) ?? []
+        if item.kind == .channel, let slug = item.channelSlug {
+            return blocks.first { $0.kind == .arenaChannel && $0.arenaSlug == slug }
+        }
+        return blocks.first { $0.arenaBlockID == item.id }
+    }
+
+    private static func makeRemoteReference(for item: ArenaContentItem) -> Block {
+        let kind: BlockKind
+        switch item.kind {
+        case .image:
+            kind = .image
+        case .attachment:
+            if item.isVideo {
+                kind = .video
+            } else if item.attachmentMime?.lowercased().hasPrefix("image/") == true || item.imageURL != nil {
+                kind = .image
+            } else {
+                kind = .link
+            }
+        case .link, .other:
+            kind = .link
+        case .text:
+            kind = .text
+        case .channel:
+            kind = .arenaChannel
+        }
+
+        let mediaURL: String?
+        if kind == .video {
+            mediaURL = item.attachmentURL
+        } else if kind == .image {
+            mediaURL = item.imageURL ?? item.attachmentURL
+        } else {
+            mediaURL = nil
+        }
+        let sourceURL = item.sourceURL
+            ?? (kind == .link ? item.attachmentURL : nil)
+            ?? mediaURL
+            ?? item.previewURL
+        let bytes = kind == .video ? item.attachmentBytes : max(item.imageBytes, item.attachmentBytes)
+        let arenaURL = item.kind == .channel
+            ? item.previewURL
+            : "https://www.are.na/block/\(item.id)"
+
+        return Block(
+            kind: kind,
+            title: item.title.isEmpty ? item.displayTitle : item.title,
+            notes: item.notes,
+            sourceURL: sourceURL,
+            mimeType: kind == .video ? item.attachmentMime : item.imageMime ?? item.attachmentMime,
+            byteSize: bytes,
+            width: item.imageWidth,
+            height: item.imageHeight,
+            textBody: item.textBody,
+            arenaSlug: item.channelSlug,
+            arenaURL: arenaURL,
+            arenaOwnerName: item.channelOwnerName,
+            arenaOwnerSlug: item.channelOwnerSlug,
+            arenaBlockCount: item.channelBlockCount,
+            arenaUpdatedAt: item.channelUpdatedAt,
+            arenaBlockID: item.kind == .channel ? nil : item.id,
+            arenaTypeName: item.typeName,
+            remoteMediaURL: mediaURL,
+            remoteThumbnailURL: item.gridImageURL
+        )
     }
 
     private static func importItem(
@@ -94,6 +167,7 @@ enum ArenaImportService {
                     sourceURL: url,
                     mimeType: item.attachmentMime
                 )
+                applyArenaMetadata(item, to: block)
                 context.insert(block)
                 ImportService.connect(block: block, to: board, context: context)
             } else if item.imageURL != nil {
@@ -129,6 +203,7 @@ enum ArenaImportService {
                 width: width,
                 height: height
             )
+            applyArenaMetadata(item, to: block)
             context.insert(block)
             ImportService.connect(block: block, to: board, context: context)
 
@@ -141,6 +216,7 @@ enum ArenaImportService {
                 notes: item.notes,
                 textBody: body
             )
+            applyArenaMetadata(item, to: block)
             context.insert(block)
             ImportService.connect(block: block, to: board, context: context)
 
@@ -159,6 +235,7 @@ enum ArenaImportService {
                 arenaBlockCount: item.channelBlockCount,
                 arenaUpdatedAt: item.channelUpdatedAt
             )
+            applyArenaMetadata(item, to: block)
             context.insert(block)
             ImportService.connect(block: block, to: board, context: context)
 
@@ -170,6 +247,7 @@ enum ArenaImportService {
                     notes: item.notes,
                     sourceURL: source
                 )
+                applyArenaMetadata(item, to: block)
                 context.insert(block)
                 ImportService.connect(block: block, to: board, context: context)
             } else if item.imageURL != nil {
@@ -215,6 +293,7 @@ enum ArenaImportService {
             width: w > 0 ? w : item.imageWidth,
             height: h > 0 ? h : item.imageHeight
         )
+        applyArenaMetadata(item, to: block)
         context.insert(block)
         ImportService.connect(block: block, to: board, context: context)
     }
@@ -247,7 +326,21 @@ enum ArenaImportService {
             height: meta.height,
             duration: meta.duration
         )
+        applyArenaMetadata(item, to: block)
         context.insert(block)
         ImportService.connect(block: block, to: board, context: context)
+    }
+
+    private static func applyArenaMetadata(_ item: ArenaContentItem, to block: Block) {
+        block.arenaBlockID = item.kind == .channel ? nil : item.id
+        block.arenaTypeName = item.typeName
+        block.arenaOwnerName = item.channelOwnerName
+        block.arenaOwnerSlug = item.channelOwnerSlug
+        block.arenaUpdatedAt = item.channelUpdatedAt
+        block.remoteMediaURL = item.isVideo ? item.attachmentURL : item.imageURL ?? item.attachmentURL
+        block.remoteThumbnailURL = item.gridImageURL
+        if item.kind != .channel {
+            block.arenaURL = "https://www.are.na/block/\(item.id)"
+        }
     }
 }

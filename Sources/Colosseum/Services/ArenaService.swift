@@ -233,6 +233,14 @@ enum ArenaService {
         return try await fetchBlockConnections(id: item.id, perPage: perPage)
     }
 
+    static func fetchConnections(for block: Block, perPage: Int = 24) async throws -> [ArenaRemoteConnection] {
+        if block.kind == .arenaChannel, let slug = block.arenaSlug, !slug.isEmpty {
+            return try await fetchChannelConnections(slug: slug, perPage: perPage)
+        }
+        guard let id = block.arenaBlockID else { return [] }
+        return try await fetchBlockConnections(id: id, perPage: perPage)
+    }
+
     private static func fetchConnectionsPage(url: URL, perPage: Int) async throws -> [ArenaRemoteConnection] {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         components.queryItems = [

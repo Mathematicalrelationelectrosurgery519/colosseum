@@ -22,8 +22,13 @@ final class Block {
     var arenaSlug: String?
     var arenaURL: String?
     var arenaOwnerName: String?
+    var arenaOwnerSlug: String?
     var arenaBlockCount: Int
     var arenaUpdatedAt: Date?
+    var arenaBlockID: Int?
+    var arenaTypeName: String?
+    var remoteMediaURL: String?
+    var remoteThumbnailURL: String?
 
     @Relationship(deleteRule: .cascade, inverse: \Connection.block)
     var connections: [Connection] = []
@@ -50,8 +55,13 @@ final class Block {
         arenaSlug: String? = nil,
         arenaURL: String? = nil,
         arenaOwnerName: String? = nil,
+        arenaOwnerSlug: String? = nil,
         arenaBlockCount: Int = 0,
-        arenaUpdatedAt: Date? = nil
+        arenaUpdatedAt: Date? = nil,
+        arenaBlockID: Int? = nil,
+        arenaTypeName: String? = nil,
+        remoteMediaURL: String? = nil,
+        remoteThumbnailURL: String? = nil
     ) {
         self.id = id
         self.kindRaw = kind.rawValue
@@ -70,8 +80,13 @@ final class Block {
         self.arenaSlug = arenaSlug
         self.arenaURL = arenaURL
         self.arenaOwnerName = arenaOwnerName
+        self.arenaOwnerSlug = arenaOwnerSlug
         self.arenaBlockCount = arenaBlockCount
         self.arenaUpdatedAt = arenaUpdatedAt
+        self.arenaBlockID = arenaBlockID
+        self.arenaTypeName = arenaTypeName
+        self.remoteMediaURL = remoteMediaURL
+        self.remoteThumbnailURL = remoteThumbnailURL
     }
 
     var displayTitle: String {
@@ -102,5 +117,9 @@ final class Block {
             if AnimatedImage.isGIF(pathExtension: ext) { return true }
         }
         return false
+    }
+
+    var isRemoteMediaReference: Bool {
+        localRelativePath == nil && remoteMediaURL != nil && (kind == .image || kind == .video)
     }
 }

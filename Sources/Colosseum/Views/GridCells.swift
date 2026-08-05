@@ -115,6 +115,9 @@ struct MediaBlockCell: View {
         if let path = block.localRelativePath {
             return MediaLibrary.absoluteURL(relativePath: path)
         }
+        if let urlString = block.remoteThumbnailURL ?? block.remoteMediaURL {
+            return URL(string: urlString)
+        }
         return nil
     }
 
@@ -160,8 +163,11 @@ struct MediaBlockCell: View {
     private func syncVideoPlayback() {
         guard block.kind == .video else { return }
         if shouldPlayVideo {
-            guard let path = block.localRelativePath else { return }
-            videoSession.start(url: MediaLibrary.absoluteURL(relativePath: path))
+            if let path = block.localRelativePath {
+                videoSession.start(url: MediaLibrary.absoluteURL(relativePath: path))
+            } else if let urlString = block.remoteMediaURL, let url = URL(string: urlString) {
+                videoSession.start(url: url)
+            }
         } else {
             videoSession.stop()
         }
@@ -196,20 +202,31 @@ struct LinkBlockCell: View {
         ZStack {
             Rectangle()
                 .fill(ColosseumTheme.surface)
-            VStack(spacing: 8) {
-                Image(systemName: "link")
-                    .font(.system(size: 20, weight: .light))
-                    .foregroundStyle(ColosseumTheme.secondaryText)
-                Text(block.displayTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(ColosseumTheme.primaryText)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(4)
-                    .padding(.horizontal, 10)
+            if let urlString = block.remoteThumbnailURL, let url = URL(string: urlString) {
+                ShimmerRemoteImage(url: url, showsBorder: false) {
+                    linkPlaceholder
+                }
+            } else {
+                linkPlaceholder
             }
         }
         .aspectRatio(1, contentMode: .fit)
         .blockTagBorder(tags: tags, lineWidth: tags.isEmpty ? 1 : ColosseumTheme.taggedBorderWidth)
+    }
+
+    private var linkPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "link")
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(ColosseumTheme.secondaryText)
+            Text(block.displayTitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(ColosseumTheme.primaryText)
+                .multilineTextAlignment(.center)
+                .lineLimit(4)
+                .padding(.horizontal, 10)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
