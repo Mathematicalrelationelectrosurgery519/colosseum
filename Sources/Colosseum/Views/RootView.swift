@@ -6,8 +6,7 @@ struct RootView: View {
     @Query(sort: \Board.updatedAt, order: .reverse) private var boards: [Board]
 
     @State private var path: [UUID] = []
-    @State private var showNewBoardAlert = false
-    @State private var newBoardTitle = ""
+    @State private var showNewBoardSheet = false
     @State private var showImportArena = false
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
     @State private var arenaStack: [ArenaBrowseTarget] = []
@@ -22,7 +21,7 @@ struct RootView: View {
                         boards: boards,
                         showsToolbar: path.isEmpty && arenaBrowseTarget == nil,
                         onOpen: { openBoard($0.id) },
-                        onCreate: { showNewBoardAlert = true },
+                        onCreate: { showNewBoardSheet = true },
                         onImportArena: { showImportArena = true }
                     )
                     .opacity(path.isEmpty ? 1 : 0)
@@ -82,12 +81,10 @@ struct RootView: View {
             }
         }
         .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
-        .alert("New Board", isPresented: $showNewBoardAlert) {
-            TextField("Title", text: $newBoardTitle)
-            Button("Create") { createBoard() }
-            Button("Cancel", role: .cancel) { newBoardTitle = "" }
-        } message: {
-            Text("Name your board. You can rename it later.")
+        .sheet(isPresented: $showNewBoardSheet) {
+            NewBoardSheet { title in
+                createBoard(title: title)
+            }
         }
         .sheet(isPresented: $showImportArena) {
             ImportArenaSheet(
@@ -103,13 +100,11 @@ struct RootView: View {
             )
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumNewBoard)) { _ in
-            newBoardTitle = ""
-            showNewBoardAlert = true
+            showNewBoardSheet = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumCommandReturn)) { _ in
             if path.isEmpty {
-                newBoardTitle = ""
-                showNewBoardAlert = true
+                showNewBoardSheet = true
             } else {
                 NotificationCenter.default.post(name: .colosseumAdd, object: nil)
             }
@@ -136,12 +131,10 @@ struct RootView: View {
         }
     }
 
-    private func createBoard() {
-        let title = newBoardTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let board = Board(title: title.isEmpty ? "Untitled" : title)
+    private func createBoard(title: String) {
+        let board = Board(title: title)
         context.insert(board)
         try? context.save()
-        newBoardTitle = ""
         openBoard(board.id)
     }
 }
