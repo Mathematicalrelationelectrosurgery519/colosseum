@@ -18,6 +18,8 @@ final class KeyNavMonitor {
     var onCopy: (() -> Bool)?
     /// Unmodified character keys (lowercase). Return true to consume the event.
     var onCharacter: ((String) -> Bool)?
+    /// Allow a focused text field to keep typing while this monitor owns arrows/enter.
+    var capturesNavigationWhileEditing = false
     /// When true, arrow / enter keys are left alone (e.g. text caret movement).
     var shouldIgnoreNavigation: (() -> Bool)?
 
@@ -27,7 +29,13 @@ final class KeyNavMonitor {
         remove()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            if Self.isEditingText {
+            if event.keyCode == 48,
+               !event.modifierFlags.contains(.shift),
+               let onTab = self.onTab,
+               onTab() {
+                return nil
+            }
+            if Self.isEditingText, !self.capturesNavigationWhileEditing {
                 // Still allow Esc to dismiss even from text.
                 if event.keyCode == 53 {
                     DispatchQueue.main.async { self.onEscape?() }
