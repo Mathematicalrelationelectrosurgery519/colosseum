@@ -23,6 +23,7 @@ struct RootView: View {
                         showsToolbar: path.isEmpty && arenaBrowseTarget == nil,
                         onOpen: { openBoard($0.id) },
                         onOpenFlattened: openFlattenedConnection(source:connection:),
+                        onDelete: deleteBoard(_:),
                         onCreate: { showNewBoardSheet = true },
                         onImportArena: { showImportArena = true }
                     )
@@ -151,6 +152,36 @@ struct RootView: View {
         withAnimation(ColosseumMotion.overlay) {
             path = [source.id]
         }
+    }
+
+    private func deleteBoard(_ board: Board) {
+        let outgoing = Array(board.connections)
+        let incoming = Array(board.nestedIn)
+        let orphanedBlocks = Dictionary(
+            uniqueKeysWithValues: outgoing.compactMap { connection -> (UUID, Block)? in
+                guard let block = connection.block,
+                      block.connections.allSatisfy({ $0.board?.id == board.id })
+                else { return nil }
+                return (block.id, block)
+            }
+        ).values
+
+        for connection in incoming {
+            connection.board?.updatedAt = .now
+            context.delete(connection)
+        }
+        for connection in outgoing {
+            context.delete(connection)
+        }
+        context.delete(board)
+
+        for block in orphanedBlocks {
+            if block.localRelativePath != nil {
+                MediaLibrary.removeBlockFiles(block.id)
+            }
+            context.delete(block)
+        }
+        try? context.save()
     }
 
     private func createBoard(title: String) {

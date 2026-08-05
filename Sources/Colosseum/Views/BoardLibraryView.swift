@@ -19,6 +19,7 @@ struct BoardLibraryView: View {
     var showsToolbar = true
     var onOpen: (Board) -> Void
     var onOpenFlattened: (Board, Connection) -> Void
+    var onDelete: (Board) -> Void
     var onCreate: () -> Void
     var onImportArena: () -> Void
 
@@ -232,6 +233,11 @@ struct BoardLibraryView: View {
         .buttonStyle(.plain)
         .pointingHandCursor()
         .id(entryID)
+        .contextMenu {
+            Button("Delete Board", role: .destructive) {
+                onDelete(board)
+            }
+        }
         .overlay {
             if focused {
                 focusRing
