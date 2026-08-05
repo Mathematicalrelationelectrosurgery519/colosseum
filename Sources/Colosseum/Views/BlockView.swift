@@ -256,7 +256,7 @@ struct BlockView: View {
                         contentPadding: 24
                     )
                 } else {
-                    ShimmerRemoteImage(url: url, square: false, contentPadding: 24) {
+                    ShimmerRemoteImage(url: url, square: false, contentPadding: 24, fullResolution: true) {
                         remoteMediaPlaceholder("Couldn’t load image")
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

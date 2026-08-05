@@ -1246,7 +1246,8 @@ private struct ArenaRemoteItemView: View {
                         ShimmerRemoteImage(
                             url: url,
                             square: false,
-                            contentPadding: 24
+                            contentPadding: 24,
+                            fullResolution: true
                         ) {
                             remotePlaceholder("Couldn’t load image")
                         }

@@ -59,6 +59,8 @@ struct ShimmerRemoteImage<Failure: View>: View {
     var square: Bool = true
     var showsBorder: Bool = true
     var contentPadding: CGFloat = 0
+    /// When true, loads full-resolution pixels (previews). Grid cells keep the default thumb path.
+    var fullResolution: Bool = false
     var failure: () -> Failure
 
     @State private var image: Image?
@@ -89,7 +91,7 @@ struct ShimmerRemoteImage<Failure: View>: View {
         .frame(maxWidth: .infinity, maxHeight: square ? nil : .infinity)
         .animation(ColosseumMotion.standard, value: showMedia)
         .animation(ColosseumMotion.soft, value: showFailure)
-        .task(id: url) {
+        .task(id: "\(url.absoluteString)#\(fullResolution)") {
             await load()
         }
     }
@@ -99,6 +101,28 @@ struct ShimmerRemoteImage<Failure: View>: View {
         loadID += 1
         let ticket = loadID
         didFail = false
+
+        if fullResolution {
+            if let cached = ImageThumbCache.cachedFullImage(for: url) {
+                image = Image(nsImage: cached)
+                return
+            }
+            // Show a grid thumb immediately while the full asset loads.
+            if let thumb = ImageThumbCache.cachedImage(for: url) {
+                image = Image(nsImage: thumb)
+            } else {
+                image = nil
+            }
+
+            let loaded = await ImageThumbCache.fullImage(for: url)
+            guard ticket == loadID, !Task.isCancelled else { return }
+            if let loaded {
+                image = Image(nsImage: loaded)
+            } else if image == nil {
+                didFail = true
+            }
+            return
+        }
 
         if let cached = ImageThumbCache.cachedImage(for: url) {
             image = Image(nsImage: cached)

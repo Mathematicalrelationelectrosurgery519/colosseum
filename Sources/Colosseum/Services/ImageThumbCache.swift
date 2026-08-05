@@ -14,6 +14,14 @@ enum ImageThumbCache {
         return cache
     }()
 
+    /// Full-resolution preview cache — few entries, higher memory budget.
+    private static let fullCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 24
+        cache.totalCostLimit = 256 * 1024 * 1024
+        return cache
+    }()
+
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.requestCachePolicy = .returnCacheDataElseLoad
@@ -52,6 +60,34 @@ enum ImageThumbCache {
         cache.object(forKey: cacheKey(url: url, maxPixelSize: maxPixelSize))
     }
 
+    /// Full-resolution decode for media previews (not grid thumbs).
+    static func fullImage(for url: URL) async -> NSImage? {
+        let key = url.absoluteString as NSString
+        if let cached = fullCache.object(forKey: key) {
+            return cached
+        }
+
+        guard !Task.isCancelled else { return nil }
+
+        let image: NSImage?
+        if url.isFileURL {
+            image = await Task.detached(priority: .userInitiated) {
+                NSImage(contentsOf: url)
+            }.value
+        } else {
+            image = await decodeRemoteFull(url: url)
+        }
+
+        if let image {
+            fullCache.setObject(image, forKey: key, cost: cost(of: image))
+        }
+        return image
+    }
+
+    static func cachedFullImage(for url: URL) -> NSImage? {
+        fullCache.object(forKey: url.absoluteString as NSString)
+    }
+
     // MARK: - Private
 
     private static func cacheKey(url: URL, maxPixelSize: Int) -> NSString {
@@ -73,6 +109,21 @@ enum ImageThumbCache {
             }
             return await Task.detached(priority: .userInitiated) {
                 decodeDownsampled(data: data, maxPixelSize: maxPixelSize)
+            }.value
+        } catch {
+            return nil
+        }
+    }
+
+    private static func decodeRemoteFull(url: URL) async -> NSImage? {
+        do {
+            let (data, response) = try await session.data(from: url)
+            try Task.checkCancellation()
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return nil
+            }
+            return await Task.detached(priority: .userInitiated) {
+                NSImage(data: data)
             }.value
         } catch {
             return nil
