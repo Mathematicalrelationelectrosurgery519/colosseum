@@ -124,11 +124,12 @@ struct RootView: View {
             goHome()
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
-            guard path.isEmpty else { return }
+            // Home library only — board/remote grids own density via their own handlers.
+            guard path.isEmpty, arenaBrowseTarget == nil else { return }
             columnCount = min(columnCount + 1, ChromeMetrics.boardColumnsMax)
         }
         .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsDecrease)) { _ in
-            guard path.isEmpty else { return }
+            guard path.isEmpty, arenaBrowseTarget == nil else { return }
             columnCount = max(columnCount - 1, ChromeMetrics.boardColumnsMin)
         }
     }

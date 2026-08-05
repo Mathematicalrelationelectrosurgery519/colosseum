@@ -358,15 +358,13 @@ struct ArenaBrowserView: View {
             .opacity(0)
             .allowsHitTesting(false)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenCommand)) { _ in
-            openOnArena()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumArenaImport)) { _ in
-            Task { await importEntireBoard() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .colosseumSearch)) { _ in
-            toggleBoardSearch()
-        }
+        .modifier(ArenaBrowserNotifications(
+            onOpenCommand: openOnArena,
+            onArenaImport: { Task { await importEntireBoard() } },
+            onSearch: toggleBoardSearch,
+            onColumnsIncrease: { adjustColumns(by: 1) },
+            onColumnsDecrease: { adjustColumns(by: -1) }
+        ))
         .overlay(alignment: .bottom) {
             if let statusMessage {
                 Text(statusMessage)
@@ -859,6 +857,18 @@ struct ArenaBrowserView: View {
         }
     }
 
+    private func adjustColumns(by delta: Int) {
+        guard isBrowsingGrid else { return }
+        let next = min(
+            max(columnCount + delta, ChromeMetrics.boardColumnsMin),
+            ChromeMetrics.boardColumnsMax
+        )
+        guard next != columnCount else { return }
+        withAnimation(ColosseumMotion.standard) {
+            columnCount = next
+        }
+    }
+
     private var columnPinchGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
@@ -894,6 +904,34 @@ struct ArenaBrowserView: View {
                 pinchDidChange = false
                 pinchBaseColumns = nil
                 lastPinchStep = 0
+            }
+    }
+}
+
+/// Keeps ArenaBrowserView.body under the type-checker limit.
+private struct ArenaBrowserNotifications: ViewModifier {
+    let onOpenCommand: () -> Void
+    let onArenaImport: () -> Void
+    let onSearch: () -> Void
+    let onColumnsIncrease: () -> Void
+    let onColumnsDecrease: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumOpenCommand)) { _ in
+                onOpenCommand()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumArenaImport)) { _ in
+                onArenaImport()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumSearch)) { _ in
+                onSearch()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsIncrease)) { _ in
+                onColumnsIncrease()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .colosseumColumnsDecrease)) { _ in
+                onColumnsDecrease()
             }
     }
 }

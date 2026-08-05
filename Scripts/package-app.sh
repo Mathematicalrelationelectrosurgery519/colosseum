@@ -6,7 +6,7 @@ cd "$ROOT"
 
 APP_NAME="Colosseum"
 BUNDLE_ID="dev.pab.colosseum"
-VERSION="1.8.0"
+VERSION="1.9.0"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 CONTENTS="$APP/Contents"
