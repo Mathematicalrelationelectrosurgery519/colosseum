@@ -42,29 +42,24 @@ struct ConnectSheet: View {
         return availableBoards.filter { $0.title.localizedCaseInsensitiveContains(query) }
     }
 
-    private var overlayHeight: CGFloat {
-        mode == .selection ? 480 : 214
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             header
 
             if mode == .selection {
                 selectionView
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
             } else {
                 createView
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
         }
-        .frame(width: 420, height: overlayHeight)
+        .frame(width: 420)
+        .fixedSize(horizontal: false, vertical: true)
         .background(ColosseumTheme.canvas)
         .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
         .focusable()
         .focused($overlayFocused)
         .focusEffectDisabled()
-        .animation(ColosseumMotion.overlay, value: mode)
+        .transaction { transaction in transaction.animation = nil }
         .onAppear {
             selectedBoardID = filtered.first?.id
             overlayFocused = true
@@ -164,25 +159,13 @@ struct ConnectSheet: View {
                     }
                     .onChange(of: selectedBoardID) { _, id in
                         guard let id else { return }
-                        withAnimation(ColosseumMotion.soft) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
+                        proxy.scrollTo(id, anchor: .center)
                     }
                 }
             }
 
-            HStack {
-                Text("↑↓ select  ·  ↩ toggle  ·  tab filter  ·  n new  ·  esc close")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 34)
-            .overlay(alignment: .top) {
-                Rectangle().fill(ColosseumTheme.border).frame(height: 1)
-            }
         }
+        .frame(height: 426)
     }
 
     private var createView: some View {
@@ -206,9 +189,6 @@ struct ConnectSheet: View {
             }
 
             HStack {
-                Text("esc back")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(ColosseumTheme.tertiaryText)
                 Spacer()
                 Button("Cancel") { showSelectionView() }
                     .buttonStyle(ChromeButtonStyle())
@@ -223,7 +203,7 @@ struct ConnectSheet: View {
             }
         }
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func boardRow(_ board: Board) -> some View {
@@ -236,7 +216,7 @@ struct ConnectSheet: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(board.title.isEmpty ? "Untitled" : board.title)
-                        .font(.system(size: 13, weight: selected ? .medium : .regular))
+                        .font(.system(size: 13))
                         .foregroundStyle(
                             connected ? ColosseumTheme.tertiaryText : ColosseumTheme.primaryText
                         )
@@ -316,13 +296,13 @@ struct ConnectSheet: View {
     private func showCreateView() {
         guard !isSaving else { return }
         newBoardTitle = ""
-        withAnimation(ColosseumMotion.overlay) { mode = .create }
+        mode = .create
     }
 
     private func showSelectionView() {
         guard !isSaving else { return }
         newBoardTitle = ""
-        withAnimation(ColosseumMotion.overlay) { mode = .selection }
+        mode = .selection
     }
 
     private func handleEscape() {
@@ -350,7 +330,7 @@ struct ConnectSheet: View {
             isSaving = false
             newBoardTitle = ""
             selectedBoardID = board.id
-            withAnimation(ColosseumMotion.overlay) { mode = .selection }
+            mode = .selection
         } catch {
             context.delete(board)
             errorMessage = error.localizedDescription

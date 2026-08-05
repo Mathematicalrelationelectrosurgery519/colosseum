@@ -36,9 +36,6 @@ struct NewBoardSheet: View {
                     .onSubmit { create() }
 
                 HStack {
-                    Text("↩ create  ·  tab title  ·  esc close")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(ColosseumTheme.tertiaryText)
                     Spacer()
                     Button("Cancel") { dismiss() }
                         .buttonStyle(ChromeButtonStyle())
@@ -49,11 +46,13 @@ struct NewBoardSheet: View {
                 }
             }
             .padding(16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(width: 420, height: 178)
+        .frame(width: 420)
+        .fixedSize(horizontal: false, vertical: true)
         .background(ColosseumTheme.canvas)
         .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+        .transaction { transaction in transaction.animation = nil }
         .onAppear {
             installKeyMonitor()
             DispatchQueue.main.async { titleFocused = true }
