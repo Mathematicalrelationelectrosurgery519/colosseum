@@ -3,9 +3,25 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum FlattenedBoardEntry: Identifiable {
+    case local(source: Board, connection: Connection)
+    case remote(source: ArenaBrowseTarget, item: ArenaContentItem)
+
+    var id: String {
+        switch self {
+        case .local(let source, let connection):
+            return "local-\(source.id.uuidString)-\(connection.id.uuidString)"
+        case .remote(let source, let item):
+            return "remote-\(source.slug)-\(item.id)"
+        }
+    }
+}
+
 struct BoardOverviewView: View {
     @Bindable var board: Board
     @Binding var path: [UUID]
+    var initialConnectionID: UUID? = nil
+    var onInitialConnectionConsumed: () -> Void = {}
 
     @Environment(\.modelContext) private var context
     @Query(sort: \Board.updatedAt, order: .reverse) private var allBoards: [Board]
@@ -41,6 +57,14 @@ struct BoardOverviewView: View {
     @State private var removalUndoStack: [RemovalUndoEntry] = []
     @State private var showBoardSearch = false
     @State private var boardSearchQuery = ""
+    @State private var flattened = false
+    @State private var flattenedFocusID: String?
+    @State private var flattenedRemoteContents: [String: [ArenaContentItem]] = [:]
+    @State private var isLoadingFlattenedContents = false
+    @State private var flattenedSelectedBoardID: UUID?
+    @State private var flattenedSelectedConnectionID: UUID?
+    @State private var arenaInitialSelectedItem: ArenaContentItem?
+    @State private var arenaInitialSelectedSiblings: [ArenaContentItem] = []
 
     private struct RemovalUndoEntry {
         let boardID: UUID
@@ -50,12 +74,17 @@ struct BoardOverviewView: View {
     }
 
     private var isBrowsingGrid: Bool {
-        selectedConnectionID == nil && arenaBrowseTarget == nil && !showBoardSearch
+        selectedConnectionID == nil
+            && flattenedSelectedConnectionID == nil
+            && arenaBrowseTarget == nil
+            && !showBoardSearch
     }
 
     /// Board owns the key monitor whenever the local grid (or its search field) is up.
     private var ownsBoardKeyboard: Bool {
-        selectedConnectionID == nil && arenaBrowseTarget == nil
+        selectedConnectionID == nil
+            && flattenedSelectedConnectionID == nil
+            && arenaBrowseTarget == nil
     }
 
     private var pathSegments: [BoardPathSegment] {
@@ -183,6 +212,52 @@ struct BoardOverviewView: View {
         connections.first(where: { $0.id == selectedConnectionID })
     }
 
+    private var flattenedSelectedBoard: Board? {
+        guard let flattenedSelectedBoardID else { return nil }
+        return allBoards.first { $0.id == flattenedSelectedBoardID }
+    }
+
+    private var flattenedEntries: [FlattenedBoardEntry] {
+        connections.flatMap { connection -> [FlattenedBoardEntry] in
+            if let nested = connection.nestedBoard {
+                return nested.sortedConnections.map {
+                    FlattenedBoardEntry.local(source: nested, connection: $0)
+                }
+            }
+            if let block = connection.block,
+               block.kind == .arenaChannel,
+               let slug = block.arenaSlug,
+               let contents = flattenedRemoteContents[slug] {
+                let source = ArenaBrowseTarget(block: block)
+                return contents.map { FlattenedBoardEntry.remote(source: source, item: $0) }
+            }
+            return [.local(source: board, connection: connection)]
+        }
+        .filter(matchesFlattenedFilters(_:))
+    }
+
+    private var flattenedListIdentity: GridListIdentity<String> {
+        var hasher = Hasher()
+        hasher.combine(board.updatedAt.timeIntervalSinceReferenceDate)
+        hasher.combine(boardsOnly)
+        hasher.combine(uncategorizedOnly)
+        hasher.combine(tagMatchMode)
+        hasher.combine(selectedTags)
+        hasher.combine(showBoardSearch)
+        hasher.combine(boardSearchQuery)
+        hasher.combine(flattenedRemoteContents.count)
+        for slug in flattenedRemoteContents.keys.sorted() {
+            hasher.combine(slug)
+            hasher.combine(flattenedRemoteContents[slug]?.count ?? 0)
+        }
+        return GridListIdentity(
+            count: flattenedEntries.count,
+            firstID: flattenedEntries.first?.id,
+            lastID: flattenedEntries.last?.id,
+            revision: UInt64(bitPattern: Int64(hasher.finalize()))
+        )
+    }
+
     private var importErrorPresented: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
@@ -204,6 +279,7 @@ struct BoardOverviewView: View {
                     activateBoardFocus()
                 }
             }
+            .onAppear { openInitialConnectionIfNeeded() }
     }
 
     @ToolbarContentBuilder
@@ -227,6 +303,7 @@ struct BoardOverviewView: View {
             isSearching: showBoardSearch,
             searchQuery: $boardSearchQuery,
             visible: selectedConnectionID == nil
+                && flattenedSelectedConnectionID == nil
                 && !isAssigningTag
                 && arenaBrowseTarget == nil,
             onDismissSearch: {
@@ -252,11 +329,14 @@ struct BoardOverviewView: View {
                     if newValue { boardsOnly = false }
                 }
             ),
+            flattened: $flattened,
             showTagMode: !availableTags.isEmpty && arenaBrowseTarget == nil && !showBoardSearch,
             showBoardsFilter: true,
             showUncategorizedFilter: arenaBrowseTarget == nil,
             isImporting: isImporting,
-            visible: selectedConnectionID == nil && !isAssigningTag
+            visible: selectedConnectionID == nil
+                && flattenedSelectedConnectionID == nil
+                && !isAssigningTag
                 && (isBrowsingGrid || showBoardSearch || arenaBrowseTarget != nil)
         )
     }
@@ -264,6 +344,7 @@ struct BoardOverviewView: View {
     private func applyBoardChrome<V: View>(to view: V) -> some View {
         view
             .animation(ColosseumMotion.overlay, value: selectedConnectionID)
+            .animation(ColosseumMotion.overlay, value: flattenedSelectedConnectionID)
             .animation(ColosseumMotion.overlay, value: arenaBrowseTarget?.slug)
             .navigationTitle("")
             .toolbarBackground(ColosseumTheme.canvas, for: .windowToolbar)
@@ -289,6 +370,8 @@ struct BoardOverviewView: View {
                         .keyboardShortcut("b", modifiers: [])
                     Button("") { toggleGridNotes() }
                         .keyboardShortcut("n", modifiers: [])
+                    Button("") { toggleFlattened() }
+                        .keyboardShortcut("f", modifiers: [])
                 }
                 .opacity(0)
                 .allowsHitTesting(false)
@@ -312,10 +395,31 @@ struct BoardOverviewView: View {
                 }
             }
             .onChange(of: filteredListIdentity) { _, _ in
+                if flattened {
+                    Task { await loadFlattenedRemoteContents() }
+                    return
+                }
                 gridFocusID = GridListIdentity.revalidatedFocus(
                     gridFocusID,
                     in: filteredConnections.lazy.map(\.id)
                 )
+            }
+            .onChange(of: flattenedListIdentity) { _, _ in
+                guard flattened else { return }
+                flattenedFocusID = GridListIdentity.revalidatedFocus(
+                    flattenedFocusID,
+                    in: flattenedEntries.lazy.map(\.id)
+                )
+            }
+            .onChange(of: flattened) { _, isFlattened in
+                endTagAssign()
+                if isFlattened {
+                    flattenedFocusID = GridListIdentity.revalidatedFocus(
+                        flattenedFocusID,
+                        in: flattenedEntries.lazy.map(\.id)
+                    )
+                    Task { await loadFlattenedRemoteContents() }
+                }
             }
             .onChange(of: availableTags) { _, tags in
                 let keys = Set(tags.map { TagParser.normalize($0) })
@@ -421,6 +525,11 @@ struct BoardOverviewView: View {
         }
     }
 
+    private func toggleFlattened() {
+        guard isBrowsingGrid || arenaBrowseTarget != nil else { return }
+        withAnimation(ColosseumMotion.soft) { flattened.toggle() }
+    }
+
     private func selectOnlyTag(_ tag: String) {
         let key = TagParser.normalize(tag)
         selectedTags = [key]
@@ -433,7 +542,9 @@ struct BoardOverviewView: View {
         // Defer one tick so SwiftUI finishes mounting after the home → board fade.
         DispatchQueue.main.async {
             boardFocused = true
-            if gridFocusID == nil {
+            if flattened, flattenedFocusID == nil {
+                flattenedFocusID = flattenedEntries.first?.id
+            } else if !flattened, gridFocusID == nil {
                 gridFocusID = filteredConnections.first?.id
             }
         }
@@ -443,6 +554,8 @@ struct BoardOverviewView: View {
         boardKeyMonitor.onLeft = {
             if isAssigningTag {
                 moveTagAssignFocus(delta: -1)
+            } else if flattened {
+                moveFlattenedFocus(delta: -1)
             } else {
                 moveGridFocus(delta: -1)
             }
@@ -450,6 +563,8 @@ struct BoardOverviewView: View {
         boardKeyMonitor.onRight = {
             if isAssigningTag {
                 moveTagAssignFocus(delta: 1)
+            } else if flattened {
+                moveFlattenedFocus(delta: 1)
             } else {
                 moveGridFocus(delta: 1)
             }
@@ -457,6 +572,8 @@ struct BoardOverviewView: View {
         boardKeyMonitor.onUp = {
             if isAssigningTag {
                 moveTagAssignFocus(delta: -1)
+            } else if flattened {
+                moveFlattenedFocus(delta: -columnCount)
             } else {
                 moveGridFocus(delta: -columnCount)
             }
@@ -464,6 +581,8 @@ struct BoardOverviewView: View {
         boardKeyMonitor.onDown = {
             if isAssigningTag {
                 moveTagAssignFocus(delta: 1)
+            } else if flattened {
+                moveFlattenedFocus(delta: columnCount)
             } else {
                 moveGridFocus(delta: columnCount)
             }
@@ -471,6 +590,8 @@ struct BoardOverviewView: View {
         boardKeyMonitor.onEnter = {
             if isAssigningTag {
                 toggleFocusedAssignTag()
+            } else if flattened {
+                activateFocusedFlattenedEntry()
             } else {
                 activateFocusedConnection()
             }
@@ -495,7 +616,11 @@ struct BoardOverviewView: View {
         }
         boardKeyMonitor.onDelete = {
             guard isBrowsingGrid, !isAssigningTag else { return }
-            deleteFocusedConnection()
+            if flattened {
+                deleteFocusedFlattenedEntry()
+            } else {
+                deleteFocusedConnection()
+            }
         }
         boardKeyMonitor.onUndo = {
             guard isBrowsingGrid, !isAssigningTag else { return false }
@@ -503,7 +628,7 @@ struct BoardOverviewView: View {
         }
         boardKeyMonitor.onCopy = {
             guard isBrowsingGrid, !isAssigningTag else { return false }
-            return copyFocusedBlock()
+            return flattened ? copyFocusedFlattenedEntry() : copyFocusedBlock()
         }
         boardKeyMonitor.onCharacter = { char in
             if char == "c" {
@@ -521,12 +646,18 @@ struct BoardOverviewView: View {
                 DispatchQueue.main.async { toggleGridNotes() }
                 return true
             }
+            if char == "f" {
+                guard isBrowsingGrid || arenaBrowseTarget != nil else { return false }
+                DispatchQueue.main.async { toggleFlattened() }
+                return true
+            }
             guard isBrowsingGrid else { return false }
             if char == "u" {
                 DispatchQueue.main.async { toggleTagMatchMode() }
                 return true
             }
             if char == "t" {
+                guard !flattened else { return false }
                 DispatchQueue.main.async { toggleTagAssign() }
                 return true
             }
@@ -539,7 +670,11 @@ struct BoardOverviewView: View {
 
     private func toggleBoardSearch() {
         // Grid only — never over block preview or hosted Arena (Arena owns its search).
-        guard selectedConnectionID == nil, arenaBrowseTarget == nil, !isAssigningTag else { return }
+        guard selectedConnectionID == nil,
+              flattenedSelectedConnectionID == nil,
+              arenaBrowseTarget == nil,
+              !isAssigningTag
+        else { return }
         withAnimation(ColosseumMotion.overlay) {
             if showBoardSearch {
                 dismissBoardSearch()
@@ -723,6 +858,182 @@ struct BoardOverviewView: View {
         openConnection(connection)
     }
 
+    private func moveFlattenedFocus(delta: Int) {
+        guard isBrowsingGrid, !flattenedEntries.isEmpty else { return }
+        boardFocused = true
+        if let index = flattenedEntries.firstIndex(where: { $0.id == flattenedFocusID }) {
+            let next = index + delta
+            guard flattenedEntries.indices.contains(next) else { return }
+            withAnimation(ColosseumMotion.soft) {
+                flattenedFocusID = flattenedEntries[next].id
+            }
+        } else {
+            flattenedFocusID = flattenedEntries.first?.id
+        }
+    }
+
+    private func activateFocusedFlattenedEntry() {
+        guard isBrowsingGrid else { return }
+        let entry = flattenedEntries.first(where: { $0.id == flattenedFocusID })
+            ?? flattenedEntries.first
+        guard let entry else { return }
+        flattenedFocusID = entry.id
+        openFlattenedEntry(entry)
+    }
+
+    @discardableResult
+    private func copyFocusedFlattenedEntry() -> Bool {
+        guard let entry = flattenedEntries.first(where: { $0.id == flattenedFocusID }) else {
+            return false
+        }
+        switch entry {
+        case .local(_, let connection):
+            guard let block = connection.block else { return false }
+            return BlockClipboard.copy(block)
+        case .remote(_, let item):
+            return BlockClipboard.copy(item)
+        }
+    }
+
+    private func deleteFocusedFlattenedEntry() {
+        guard let index = flattenedEntries.firstIndex(where: { $0.id == flattenedFocusID }) else { return }
+        guard case .local(let source, let connection) = flattenedEntries[index] else { return }
+        let entry = RemovalUndoEntry(
+            boardID: source.id,
+            position: connection.position,
+            blockID: connection.block?.id,
+            nestedBoardID: connection.nestedBoard?.id
+        )
+        ImportService.removeConnection(connection, deleteOrphanedBlock: false, context: context)
+        pushRemovalUndo(entry)
+        try? context.save()
+
+        let remaining = flattenedEntries
+        if remaining.isEmpty {
+            flattenedFocusID = nil
+        } else if index < remaining.count {
+            flattenedFocusID = remaining[index].id
+        } else {
+            flattenedFocusID = remaining.last?.id
+        }
+    }
+
+    private func openFlattenedEntry(_ entry: FlattenedBoardEntry) {
+        switch entry {
+        case .local(let source, let connection):
+            if source.id == board.id {
+                openConnection(connection)
+            } else if let nested = connection.nestedBoard {
+                withAnimation(ColosseumMotion.overlay) {
+                    if path.last != source.id { path.append(source.id) }
+                    path.append(nested.id)
+                }
+            } else if let block = connection.block, block.kind == .arenaChannel {
+                openFlattenedRemoteBoard(ArenaBrowseTarget(block: block), selectedItem: nil, siblings: [])
+            } else if connection.block != nil {
+                withAnimation(ColosseumMotion.overlay) {
+                    flattenedSelectedBoardID = source.id
+                    flattenedSelectedConnectionID = connection.id
+                }
+            }
+        case .remote(let source, let item):
+            if item.kind == .channel, let slug = item.channelSlug {
+                openFlattenedRemoteBoard(
+                    ArenaBrowseTarget(slug: slug, title: item.title, urlString: item.previewURL),
+                    selectedItem: nil,
+                    siblings: []
+                )
+            } else {
+                let siblings = (flattenedRemoteContents[source.slug] ?? [])
+                    .filter { $0.kind != .channel }
+                openFlattenedRemoteBoard(source, selectedItem: item, siblings: siblings)
+            }
+        }
+    }
+
+    private func closeFlattenedPreview() {
+        withAnimation(ColosseumMotion.overlay) {
+            flattenedSelectedBoardID = nil
+            flattenedSelectedConnectionID = nil
+        }
+        activateBoardFocus()
+    }
+
+    private func openFlattenedRemoteBoard(
+        _ target: ArenaBrowseTarget,
+        selectedItem: ArenaContentItem?,
+        siblings: [ArenaContentItem]
+    ) {
+        withAnimation(ColosseumMotion.overlay) {
+            flattenedSelectedBoardID = nil
+            flattenedSelectedConnectionID = nil
+            showBoardSearch = false
+            boardSearchQuery = ""
+            arenaInitialSelectedItem = selectedItem
+            arenaInitialSelectedSiblings = siblings
+            arenaStack = [target]
+            arenaBrowseTarget = target
+        }
+    }
+
+    private func matchesFlattenedFilters(_ entry: FlattenedBoardEntry) -> Bool {
+        let isBoard: Bool
+        let itemNotes: String
+        let itemTitle: String
+        let tags: Set<String>
+        switch entry {
+        case .local(_, let connection):
+            isBoard = connection.nestedBoard != nil || connection.block?.kind == .arenaChannel
+            itemNotes = notes(for: connection)
+            itemTitle = title(for: connection)
+            tags = TagParser.tags(for: connection)
+        case .remote(_, let item):
+            isBoard = item.kind == .channel
+            itemNotes = item.notes
+            itemTitle = item.title
+            tags = Set(TagParser.tags(in: item.notes).map(TagParser.normalize))
+        }
+
+        if uncategorizedOnly {
+            if isBoard || !tags.isEmpty { return false }
+        } else if boardsOnly, !isBoard {
+            return false
+        }
+        if !uncategorizedOnly, !selectedTags.isEmpty {
+            switch tagMatchMode {
+            case .intersection:
+                if !selectedTags.isSubset(of: tags) { return false }
+            case .union:
+                if selectedTags.isDisjoint(with: tags) { return false }
+            }
+        }
+        let query = boardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if showBoardSearch, !query.isEmpty {
+            return BoardContentSearch.matches([itemTitle, itemNotes], query: query)
+        }
+        return true
+    }
+
+    @MainActor
+    private func loadFlattenedRemoteContents() async {
+        guard flattened, !isLoadingFlattenedContents else { return }
+        isLoadingFlattenedContents = true
+        defer { isLoadingFlattenedContents = false }
+        let channels = connections.compactMap { connection -> (String, Block)? in
+            guard let block = connection.block,
+                  block.kind == .arenaChannel,
+                  let slug = block.arenaSlug
+            else { return nil }
+            return (slug, block)
+        }
+        for (slug, _) in channels where flattenedRemoteContents[slug] == nil {
+            guard flattened else { return }
+            if let contents = try? await ArenaService.fetchAllContents(slug: slug) {
+                flattenedRemoteContents[slug] = contents
+            }
+        }
+    }
+
     private func openConnection(_ connection: Connection) {
         if let nested = connection.nestedBoard {
             withAnimation(ColosseumMotion.overlay) {
@@ -736,6 +1047,16 @@ struct BoardOverviewView: View {
                     selectedConnectionID = connection.id
                 }
             }
+        }
+    }
+
+    private func openInitialConnectionIfNeeded() {
+        guard let initialConnectionID,
+              let connection = connections.first(where: { $0.id == initialConnectionID })
+        else { return }
+        onInitialConnectionConsumed()
+        DispatchQueue.main.async {
+            openConnection(connection)
         }
     }
 
@@ -788,6 +1109,29 @@ struct BoardOverviewView: View {
                 .zIndex(10)
             }
 
+            if let sourceBoard = flattenedSelectedBoard,
+               let selectedID = flattenedSelectedConnectionID,
+               sourceBoard.connections.contains(where: { $0.id == selectedID }) {
+                BlockView(
+                    board: sourceBoard,
+                    connections: sourceBoard.sortedConnections.filter {
+                        $0.block != nil && $0.block?.kind != .arenaChannel
+                    },
+                    selectedID: Binding(
+                        get: { flattenedSelectedConnectionID },
+                        set: { flattenedSelectedConnectionID = $0 }
+                    ),
+                    onClose: closeFlattenedPreview,
+                    onOpenBoard: openConnectedBoard(_:),
+                    onOpenRemoteBoard: { target in
+                        closeFlattenedPreview()
+                        openFlattenedRemoteBoard(target, selectedItem: nil, siblings: [])
+                    }
+                )
+                .transition(ColosseumMotion.overlayTransition)
+                .zIndex(10)
+            }
+
             if let arenaBrowseTarget {
                 ArenaBrowserView(
                     initialTarget: arenaBrowseTarget,
@@ -795,14 +1139,19 @@ struct BoardOverviewView: View {
                     destinationBoard: board,
                     showsInlineChrome: false,
                     boardsOnly: $boardsOnly,
+                    flattened: $flattened,
                     searchActive: $showBoardSearch,
                     searchQuery: $boardSearchQuery,
+                    initialSelectedItem: arenaInitialSelectedItem,
+                    initialSelectedSiblings: arenaInitialSelectedSiblings,
                     onClose: {
                         withAnimation(ColosseumMotion.overlay) {
                             showBoardSearch = false
                             boardSearchQuery = ""
                             self.arenaBrowseTarget = nil
                             arenaStack = []
+                            arenaInitialSelectedItem = nil
+                            arenaInitialSelectedSiblings = []
                         }
                     },
                     onImportedBoard: { imported in
@@ -811,6 +1160,8 @@ struct BoardOverviewView: View {
                             boardSearchQuery = ""
                             self.arenaBrowseTarget = nil
                             arenaStack = []
+                            arenaInitialSelectedItem = nil
+                            arenaInitialSelectedSiblings = []
                             path.append(imported.id)
                         }
                     }
@@ -822,6 +1173,16 @@ struct BoardOverviewView: View {
     }
 
     private var boardGrid: some View {
+        Group {
+            if flattened {
+                flattenedBoardGrid
+            } else {
+                regularBoardGrid
+            }
+        }
+    }
+
+    private var regularBoardGrid: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
@@ -893,6 +1254,94 @@ struct BoardOverviewView: View {
         }
         .highPriorityGesture(columnPinchGesture)
         .animation(ColosseumMotion.overlay, value: isAssigningTag)
+    }
+
+    private var flattenedBoardGrid: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
+                    Button {
+                        guard !shouldSuppressGridClicks else { return }
+                        showAddSheet = true
+                    } label: {
+                        GridBlockChrome(notes: "", showsNotes: showGridNotes) {
+                            AddBlockCell()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .pointingHandCursor()
+
+                    ForEach(flattenedEntries) { entry in
+                        flattenedEntryCell(entry)
+                            .id(entry.id)
+                            .pointingHandCursor()
+                            .transition(ColosseumMotion.itemTransition)
+                    }
+                }
+                .padding(28)
+                .animation(ColosseumMotion.standard, value: selectedTags)
+                .animation(ColosseumMotion.standard, value: tagMatchMode)
+                .animation(ColosseumMotion.standard, value: boardsOnly)
+                .animation(ColosseumMotion.standard, value: uncategorizedOnly)
+                .animation(ColosseumMotion.standard, value: showGridNotes)
+                .animation(ColosseumMotion.soft, value: flattenedListIdentity)
+                .animation(ColosseumMotion.standard, value: columnCount)
+                .allowsHitTesting(!isPinching)
+            }
+            .overlay(alignment: .bottom) {
+                if isLoadingFlattenedContents {
+                    Text("Flattening remote boards…")
+                        .font(.caption)
+                        .foregroundStyle(ColosseumTheme.secondaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(ColosseumTheme.elevated)
+                        .overlay(Rectangle().stroke(ColosseumTheme.border, lineWidth: 1))
+                        .padding(.bottom, 20)
+                }
+            }
+            .onChange(of: flattenedFocusID) { _, id in
+                guard let id, isBrowsingGrid else { return }
+                withAnimation(ColosseumMotion.soft) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+        }
+        .highPriorityGesture(columnPinchGesture)
+    }
+
+    @ViewBuilder
+    private func flattenedEntryCell(_ entry: FlattenedBoardEntry) -> some View {
+        let isSelected = entry.id == flattenedFocusID && isBrowsingGrid
+        Button {
+            guard !shouldSuppressGridClicks else { return }
+            flattenedFocusID = entry.id
+            openFlattenedEntry(entry)
+        } label: {
+            switch entry {
+            case .local(_, let connection):
+                GridBlockChrome(
+                    notes: notes(for: connection),
+                    title: title(for: connection),
+                    searchQuery: showBoardSearch ? boardSearchQuery : "",
+                    isSelected: isSelected,
+                    showsNotes: showGridNotes
+                ) {
+                    connectionCellContent(connection, isSelected: isSelected)
+                }
+            case .remote(_, let item):
+                GridBlockChrome(
+                    notes: item.notes,
+                    title: item.title,
+                    searchQuery: showBoardSearch ? boardSearchQuery : "",
+                    isSelected: isSelected,
+                    showsNotes: showGridNotes
+                ) {
+                    ArenaRemoteCell(item: item, isHovering: false, hoverPlayer: nil)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -1085,6 +1534,9 @@ struct BoardOverviewView: View {
                 arenaStack = []
             }
         }
+        if flattenedSelectedConnectionID != nil {
+            closeFlattenedPreview()
+        }
         guard index >= 0, index < path.count else { return }
         withAnimation(ColosseumMotion.overlay) {
             path = Array(path.prefix(index + 1))
@@ -1117,7 +1569,11 @@ struct BoardOverviewView: View {
             return
         }
         // Block preview / Arena browser own Esc (including nested Connect sheets).
-        if selectedConnectionID != nil || arenaBrowseTarget != nil { return }
+        if selectedConnectionID != nil
+            || flattenedSelectedConnectionID != nil
+            || arenaBrowseTarget != nil {
+            return
+        }
         withAnimation(ColosseumMotion.overlay) {
             if path.count > 1 {
                 _ = path.popLast()
@@ -1135,6 +1591,8 @@ struct BoardOverviewView: View {
             showBoardSearch = false
             boardSearchQuery = ""
             boardsOnly = false
+            arenaInitialSelectedItem = nil
+            arenaInitialSelectedSiblings = []
             arenaStack = [target]
             arenaBrowseTarget = target
         }

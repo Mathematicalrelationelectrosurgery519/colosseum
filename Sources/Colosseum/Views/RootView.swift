@@ -10,6 +10,7 @@ struct RootView: View {
     @State private var showImportArena = false
     @State private var arenaBrowseTarget: ArenaBrowseTarget?
     @State private var arenaStack: [ArenaBrowseTarget] = []
+    @State private var pendingConnectionID: UUID?
     @AppStorage("boardColumnCount") private var columnCount = ChromeMetrics.boardColumnsDefault
 
     var body: some View {
@@ -21,6 +22,7 @@ struct RootView: View {
                         boards: boards,
                         showsToolbar: path.isEmpty && arenaBrowseTarget == nil,
                         onOpen: { openBoard($0.id) },
+                        onOpenFlattened: openFlattenedConnection(source:connection:),
                         onCreate: { showNewBoardSheet = true },
                         onImportArena: { showImportArena = true }
                     )
@@ -28,7 +30,12 @@ struct RootView: View {
                     .allowsHitTesting(path.isEmpty && arenaBrowseTarget == nil)
 
                     if let boardID = path.last {
-                        BoardRouteView(boardID: boardID, path: $path)
+                        BoardRouteView(
+                            boardID: boardID,
+                            path: $path,
+                            initialConnectionID: pendingConnectionID,
+                            onInitialConnectionConsumed: { pendingConnectionID = nil }
+                        )
                             .id(boardID)
                             .transition(ColosseumMotion.overlayTransition)
                             .zIndex(1)
@@ -126,8 +133,23 @@ struct RootView: View {
     }
 
     private func openBoard(_ id: UUID) {
+        pendingConnectionID = nil
         withAnimation(ColosseumMotion.overlay) {
             path = [id]
+        }
+    }
+
+    private func openFlattenedConnection(source: Board, connection: Connection) {
+        if let nested = connection.nestedBoard {
+            pendingConnectionID = nil
+            withAnimation(ColosseumMotion.overlay) {
+                path = [source.id, nested.id]
+            }
+            return
+        }
+        pendingConnectionID = connection.id
+        withAnimation(ColosseumMotion.overlay) {
+            path = [source.id]
         }
     }
 

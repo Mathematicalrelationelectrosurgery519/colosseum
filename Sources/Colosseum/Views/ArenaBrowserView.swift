@@ -24,6 +24,8 @@ struct ArenaBrowserView: View {
     /// Shared with host principal search when chrome is external.
     var searchActive: Binding<Bool>? = nil
     var searchQuery: Binding<String>? = nil
+    var initialSelectedItem: ArenaContentItem? = nil
+    var initialSelectedSiblings: [ArenaContentItem] = []
     var onClose: () -> Void
     var onImportedBoard: ((Board) -> Void)?
 
@@ -240,6 +242,12 @@ struct ArenaBrowserView: View {
                 stack = [initialTarget]
             }
             model.load(currentTarget)
+            if let initialSelectedItem {
+                selectedItemSiblings = initialSelectedSiblings.isEmpty
+                    ? [initialSelectedItem]
+                    : initialSelectedSiblings
+                selectedItem = initialSelectedItem
+            }
             activateFocus()
         }
         .onDisappear { keyMonitor.remove() }
@@ -856,7 +864,7 @@ struct ArenaBrowserView: View {
 
 // MARK: - Grid cell
 
-private struct ArenaRemoteCell: View {
+struct ArenaRemoteCell: View {
     let item: ArenaContentItem
     var isHovering: Bool
     var hoverPlayer: LoopingVideoPlayer?

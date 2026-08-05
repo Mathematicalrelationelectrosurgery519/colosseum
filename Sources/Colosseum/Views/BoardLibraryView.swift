@@ -1,19 +1,34 @@
 import SwiftData
 import SwiftUI
 
+private enum BoardLibraryEntry: Identifiable {
+    case board(Board)
+    case connection(source: Board, connection: Connection)
+
+    var id: String {
+        switch self {
+        case .board(let board): return "board-\(board.id.uuidString)"
+        case .connection(let source, let connection):
+            return "connection-\(source.id.uuidString)-\(connection.id.uuidString)"
+        }
+    }
+}
+
 struct BoardLibraryView: View {
     let boards: [Board]
     var showsToolbar = true
     var onOpen: (Board) -> Void
+    var onOpenFlattened: (Board, Connection) -> Void
     var onCreate: () -> Void
     var onImportArena: () -> Void
 
-    @State private var gridFocusID: UUID?
+    @State private var gridFocusID: String?
     @State private var gridWidth: CGFloat = 900
     @State private var keyMonitor = KeyNavMonitor()
     @FocusState private var homeFocused: Bool
     @State private var showSearch = false
     @State private var searchQuery = ""
+    @State private var flattened = false
 
     private let minCardWidth: CGFloat = 200
 
@@ -26,23 +41,42 @@ struct BoardLibraryView: View {
         [GridItem(.adaptive(minimum: minCardWidth, maximum: 280), spacing: ColosseumTheme.gridGap)]
     }
 
-    private var filteredBoards: [Board] {
+    private var displayedEntries: [BoardLibraryEntry] {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard showSearch, !query.isEmpty else { return boards }
-        return boards.filter {
-            BoardContentSearch.matches([$0.title], query: query)
+        let entries: [BoardLibraryEntry]
+        if flattened {
+            entries = boards.flatMap { board in
+                board.sortedConnections.map { BoardLibraryEntry.connection(source: board, connection: $0) }
+            }
+        } else {
+            entries = boards.map(BoardLibraryEntry.board)
+        }
+        guard showSearch, !query.isEmpty else { return entries }
+        return entries.filter { entry in
+            switch entry {
+            case .board(let board):
+                return BoardContentSearch.matches([board.title], query: query)
+            case .connection(let source, let connection):
+                return BoardContentSearch.matches(
+                    [source.title, title(for: connection), notes(for: connection)],
+                    query: query
+                )
+            }
         }
     }
 
-    private var filteredListIdentity: GridListIdentity<UUID> {
+    private var filteredListIdentity: GridListIdentity<String> {
         var hasher = Hasher()
         hasher.combine(boards.count)
         hasher.combine(showSearch)
         hasher.combine(searchQuery)
+        hasher.combine(flattened)
         if let first = boards.first { hasher.combine(first.updatedAt.timeIntervalSinceReferenceDate) }
         if let last = boards.last { hasher.combine(last.updatedAt.timeIntervalSinceReferenceDate) }
-        return GridListIdentities.boards(
-            filteredBoards,
+        return GridListIdentity(
+            count: displayedEntries.count,
+            firstID: displayedEntries.first?.id,
+            lastID: displayedEntries.last?.id,
             revision: UInt64(bitPattern: Int64(hasher.finalize()))
         )
     }
@@ -84,8 +118,8 @@ struct BoardLibraryView: View {
             }
             .onChange(of: filteredListIdentity) { _, _ in
                 gridFocusID = GridListIdentity.revalidatedFocus(
-                    gridFocusID,
-                    in: filteredBoards.lazy.map(\.id)
+                gridFocusID,
+                    in: displayedEntries.lazy.map(\.id)
                 )
             }
             .onExitCommand {
@@ -122,6 +156,11 @@ struct BoardLibraryView: View {
                             height: ChromeMetrics.controlHeight
                         )
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    FlattenToggleIcon(isActive: $flattened)
+                        .padding(.trailing, max(0, ChromeMetrics.contentInset - 10))
+                }
+                .colosseumPlainToolbarItem()
             }
         }
 
@@ -144,9 +183,9 @@ struct BoardLibraryView: View {
     private var libraryScrollBody: some View {
         if boards.isEmpty {
             emptyState
-        } else if filteredBoards.isEmpty {
+        } else if displayedEntries.isEmpty {
             Text(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "Type to filter boards"
+                ? (flattened ? "No blocks in these boards" : "Type to filter boards")
                 : "No boards match")
                 .font(.system(size: 13))
                 .foregroundStyle(ColosseumTheme.tertiaryText)
@@ -159,8 +198,13 @@ struct BoardLibraryView: View {
 
     private var boardGrid: some View {
         LazyVGrid(columns: columns, spacing: ColosseumTheme.gridGap) {
-            ForEach(filteredBoards, id: \.id) { board in
-                boardCell(board)
+            ForEach(displayedEntries) { entry in
+                switch entry {
+                case .board(let board):
+                    boardCell(board, entryID: entry.id)
+                case .connection(let source, let connection):
+                    flattenedConnectionCell(source: source, connection: connection, entryID: entry.id)
+                }
             }
         }
         .padding(.horizontal, 28)
@@ -174,10 +218,10 @@ struct BoardLibraryView: View {
         .animation(ColosseumMotion.soft, value: filteredListIdentity)
     }
 
-    private func boardCell(_ board: Board) -> some View {
-        let focused = board.id == gridFocusID && isBrowsingGrid
+    private func boardCell(_ board: Board, entryID: String) -> some View {
+        let focused = entryID == gridFocusID && isBrowsingGrid
         return Button {
-            gridFocusID = board.id
+            gridFocusID = entryID
             onOpen(board)
         } label: {
             BoardCardView(
@@ -187,12 +231,60 @@ struct BoardLibraryView: View {
         }
         .buttonStyle(.plain)
         .pointingHandCursor()
-        .id(board.id)
+        .id(entryID)
         .overlay {
             if focused {
                 focusRing
             }
         }
+    }
+
+    private func flattenedConnectionCell(
+        source: Board,
+        connection: Connection,
+        entryID: String
+    ) -> some View {
+        let focused = entryID == gridFocusID && isBrowsingGrid
+        return Button {
+            gridFocusID = entryID
+            onOpenFlattened(source, connection)
+        } label: {
+            GridBlockChrome(
+                notes: notes(for: connection),
+                title: title(for: connection),
+                searchQuery: showSearch ? searchQuery : "",
+                isSelected: focused,
+                showsNotes: true
+            ) {
+                connectionContent(connection)
+            }
+        }
+        .buttonStyle(.plain)
+        .pointingHandCursor()
+        .id(entryID)
+        .help("From \(source.title)")
+    }
+
+    @ViewBuilder
+    private func connectionContent(_ connection: Connection) -> some View {
+        if let nested = connection.nestedBoard {
+            NestedBoardCell(board: nested)
+        } else if let block = connection.block {
+            switch block.kind {
+            case .image, .video: MediaBlockCell(block: block)
+            case .text: TextBlockCell(block: block)
+            case .link: LinkBlockCell(block: block)
+            case .arenaChannel: ArenaBlockCell(block: block)
+            }
+        }
+    }
+
+    private func title(for connection: Connection) -> String {
+        connection.nestedBoard?.title ?? connection.block?.title ?? ""
+    }
+
+    private func notes(for connection: Connection) -> String {
+        connection.nestedBoard?.notes ?? connection.block?.notes ?? ""
     }
 
     private var focusRing: some View {
@@ -250,6 +342,13 @@ struct BoardLibraryView: View {
         keyMonitor.onUp = { moveFocus(delta: -columnCount) }
         keyMonitor.onDown = { moveFocus(delta: columnCount) }
         keyMonitor.onEnter = { openFocused() }
+        keyMonitor.onCharacter = { character in
+            guard character == "f", isBrowsingGrid else { return false }
+            DispatchQueue.main.async {
+                withAnimation(ColosseumMotion.soft) { flattened.toggle() }
+            }
+            return true
+        }
         keyMonitor.onEscape = {
             if showSearch {
                 withAnimation(ColosseumMotion.overlay) {
@@ -263,33 +362,36 @@ struct BoardLibraryView: View {
         DispatchQueue.main.async {
             homeFocused = true
             if gridFocusID == nil {
-                gridFocusID = filteredBoards.first?.id
+                gridFocusID = displayedEntries.first?.id
             }
         }
     }
 
     private func moveFocus(delta: Int) {
-        guard isBrowsingGrid, !filteredBoards.isEmpty else { return }
+        guard isBrowsingGrid, !displayedEntries.isEmpty else { return }
         homeFocused = true
-        if let idx = filteredBoards.firstIndex(where: { $0.id == gridFocusID }) {
+        if let idx = displayedEntries.firstIndex(where: { $0.id == gridFocusID }) {
             let next = idx + delta
-            guard next >= 0, next < filteredBoards.count else { return }
+            guard next >= 0, next < displayedEntries.count else { return }
             withAnimation(ColosseumMotion.soft) {
-                gridFocusID = filteredBoards[next].id
+                gridFocusID = displayedEntries[next].id
             }
         } else {
             withAnimation(ColosseumMotion.soft) {
-                gridFocusID = filteredBoards[0].id
+                gridFocusID = displayedEntries[0].id
             }
         }
     }
 
     private func openFocused() {
         guard isBrowsingGrid else { return }
-        let board = filteredBoards.first(where: { $0.id == gridFocusID }) ?? filteredBoards.first
-        guard let board else { return }
-        gridFocusID = board.id
-        onOpen(board)
+        let entry = displayedEntries.first(where: { $0.id == gridFocusID }) ?? displayedEntries.first
+        guard let entry else { return }
+        gridFocusID = entry.id
+        switch entry {
+        case .board(let board): onOpen(board)
+        case .connection(let source, let connection): onOpenFlattened(source, connection)
+        }
     }
 }
 
