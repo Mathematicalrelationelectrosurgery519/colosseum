@@ -57,7 +57,7 @@ struct TagMatchModeIcon: View {
     }
 }
 
-/// Lowercase `c` toggle — show only untagged blocks (no nested/Are.na boards).
+/// Period toggle — show only untagged blocks (no nested/Are.na boards).
 struct UncategorizedFilterIcon: View {
     @Binding var isActive: Bool
 
@@ -67,7 +67,7 @@ struct UncategorizedFilterIcon: View {
                 isActive.toggle()
             }
         } label: {
-            Text("c")
+            Text(".")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(isActive ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText)
                 .frame(width: 12, height: 12)
@@ -76,8 +76,8 @@ struct UncategorizedFilterIcon: View {
         .buttonStyle(.plain)
         .help(
             isActive
-                ? "Showing uncategorized blocks only (C). Click to show all."
-                : "Uncategorized — blocks with no tags (C)"
+                ? "Showing uncategorized blocks only (.). Click to show all."
+                : "Uncategorized — blocks with no tags (.)"
         )
         .pointingHandCursor()
         .animation(ColosseumMotion.soft, value: isActive)

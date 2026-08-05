@@ -312,15 +312,16 @@ struct FlattenToggleIcon: View {
         Button {
             withAnimation(ColosseumMotion.soft) { isActive.toggle() }
         } label: {
-            Image(systemName: isActive ? "square.stack.3d.up.fill" : "square.stack.3d.up")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isActive ? ColosseumTheme.primaryText : ColosseumTheme.secondaryText)
-                .frame(width: ChromeMetrics.iconButtonWidth, height: ChromeMetrics.controlHeight)
+            Text("f")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(isActive ? ColosseumTheme.primaryText : ColosseumTheme.tertiaryText)
+                .frame(width: 12, height: 12)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(isActive ? "Show child boards" : "Flatten child boards")
+        .help(isActive ? "Flattened (F). Click to show child boards." : "Flatten child boards (F)")
         .pointingHandCursor()
+        .animation(ColosseumMotion.soft, value: isActive)
     }
 }
 

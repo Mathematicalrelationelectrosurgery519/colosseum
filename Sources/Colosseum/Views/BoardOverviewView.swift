@@ -365,7 +365,7 @@ struct BoardOverviewView: View {
                     Button("") { toggleTagMatchMode() }
                         .keyboardShortcut("u", modifiers: [])
                     Button("") { toggleUncategorizedOnly() }
-                        .keyboardShortcut("c", modifiers: [])
+                        .keyboardShortcut(".", modifiers: [])
                     Button("") { toggleBoardsOnly() }
                         .keyboardShortcut("b", modifiers: [])
                     Button("") { toggleGridNotes() }
@@ -631,7 +631,7 @@ struct BoardOverviewView: View {
             return flattened ? copyFocusedFlattenedEntry() : copyFocusedBlock()
         }
         boardKeyMonitor.onCharacter = { char in
-            if char == "c" {
+            if char == "." {
                 guard isBrowsingGrid else { return false }
                 DispatchQueue.main.async { toggleUncategorizedOnly() }
                 return true
