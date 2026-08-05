@@ -64,6 +64,7 @@ struct BlockView: View {
                 ShortcutHint(text: "↑↓")
                 ShortcutHint(text: "↩")
                 ShortcutHint(text: "⌘C")
+                ShortcutHint(text: "c")
                 ShortcutHint(text: "tab")
                 ShortcutHint(text: "esc")
             }
@@ -168,6 +169,11 @@ struct BlockView: View {
         keyMonitor.onCopy = {
             guard let block else { return false }
             return BlockClipboard.copy(block)
+        }
+        keyMonitor.onCharacter = { char in
+            guard char == "c", block != nil else { return false }
+            DispatchQueue.main.async { showConnect = true }
+            return true
         }
         keyMonitor.shouldIgnoreNavigation = { showConnect }
         keyMonitor.install()

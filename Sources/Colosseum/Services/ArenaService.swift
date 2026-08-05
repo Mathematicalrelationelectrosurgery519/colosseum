@@ -96,6 +96,35 @@ struct ArenaContentItem: Sendable, Identifiable, Hashable {
         }
         return typeName
     }
+
+    static func channel(_ channel: ArenaChannelPreview) -> ArenaContentItem {
+        ArenaContentItem(
+            id: 0,
+            kind: .channel,
+            typeName: "Channel",
+            title: channel.title,
+            notes: channel.notes,
+            sourceURL: channel.url.absoluteString,
+            imageURL: nil,
+            thumbURL: nil,
+            imageWidth: 0,
+            imageHeight: 0,
+            imageMime: nil,
+            imageFilename: nil,
+            imageBytes: 0,
+            attachmentURL: nil,
+            attachmentMime: nil,
+            attachmentFilename: nil,
+            attachmentBytes: 0,
+            textBody: "",
+            channelSlug: channel.slug,
+            channelOwnerName: channel.ownerName,
+            channelOwnerSlug: channel.ownerSlug,
+            channelBlockCount: channel.blockCount,
+            channelUpdatedAt: channel.updatedAt,
+            position: 0
+        )
+    }
 }
 
 enum ArenaService {

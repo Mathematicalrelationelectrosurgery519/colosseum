@@ -21,6 +21,7 @@ struct ArenaBrowserView: View {
     @Environment(\.modelContext) private var context
     @State private var model = ArenaBrowserModel()
     @State private var selectedItem: ArenaContentItem?
+    @State private var showConnect = false
     @State private var isImporting = false
     @State private var importProgress = ""
     @State private var statusMessage: String?
@@ -202,6 +203,9 @@ struct ArenaBrowserView: View {
                 keyMonitor.remove()
             }
         }
+        .onChange(of: showConnect) { _, _ in
+            installKeyMonitor()
+        }
         .onChange(of: showBoardSearch) { _, searching in
             if !searching, selectedItem == nil {
                 activateFocus()
@@ -276,6 +280,16 @@ struct ArenaBrowserView: View {
             }
         }
         .highPriorityGesture(columnPinchGesture)
+        .sheet(isPresented: $showConnect) {
+            if let channel = model.channel {
+                ConnectSheet(
+                    block: nil,
+                    nestedBoard: nil,
+                    remoteItem: ArenaContentItem.channel(channel),
+                    excludeBoardID: nil
+                )
+            }
+        }
     }
 
     private var inlineChrome: some View {
@@ -483,6 +497,10 @@ struct ArenaBrowserView: View {
         }
         keyMonitor.onCharacter = { char in
             guard isBrowsingGrid else { return false }
+            if char == "c", model.channel != nil {
+                DispatchQueue.main.async { showConnect = true }
+                return true
+            }
             if char == "b" {
                 DispatchQueue.main.async {
                     withAnimation(ColosseumMotion.soft) {
@@ -503,7 +521,7 @@ struct ArenaBrowserView: View {
         }
         // Ignore arrows/enter while searching or in item detail; Esc still routes here
         // (including when the header search field is first responder).
-        keyMonitor.shouldIgnoreNavigation = { selectedItem != nil || showBoardSearch }
+        keyMonitor.shouldIgnoreNavigation = { selectedItem != nil || showBoardSearch || showConnect }
         keyMonitor.install()
     }
 
@@ -850,6 +868,7 @@ private struct ArenaRemoteItemView: View {
                 ShortcutHint(text: "↑↓")
                 ShortcutHint(text: "↩")
                 ShortcutHint(text: "⌘C")
+                ShortcutHint(text: "c")
                 ShortcutHint(text: "esc")
             }
             .padding(16)
@@ -925,6 +944,11 @@ private struct ArenaRemoteItemView: View {
         keyMonitor.onCopy = {
             guard let item else { return false }
             return BlockClipboard.copy(item)
+        }
+        keyMonitor.onCharacter = { char in
+            guard char == "c", item != nil else { return false }
+            DispatchQueue.main.async { showConnect = true }
+            return true
         }
         keyMonitor.shouldIgnoreNavigation = { showConnect }
         keyMonitor.install()
