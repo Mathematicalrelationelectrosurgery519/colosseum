@@ -1353,7 +1353,12 @@ struct BoardOverviewView: View {
                     isSelected: isSelected,
                     showsNotes: showGridNotes
                 ) {
-                    ArenaRemoteCell(item: item, isHovering: false, hoverPlayer: nil)
+                    ArenaRemoteCell(
+                        item: item,
+                        isHovering: false,
+                        isSelected: isSelected,
+                        hoverPlayer: nil
+                    )
                 }
             }
         }

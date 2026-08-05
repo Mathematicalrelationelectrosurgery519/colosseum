@@ -11,6 +11,8 @@ struct AnimatedImageView: NSViewRepresentable {
     let url: URL
     var imageScaling: NSImageScaling = .scaleProportionallyUpOrDown
 
+    private static let remoteCache = NSCache<NSURL, NSImage>()
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -70,12 +72,41 @@ struct AnimatedImageView: NSViewRepresentable {
     final class Coordinator {
         var currentURL: URL?
         weak var imageView: NSImageView?
+        private var dataTask: URLSessionDataTask?
 
         func load(url: URL) {
+            dataTask?.cancel()
+            dataTask = nil
             currentURL = url
             guard let imageView else { return }
-            imageView.image = NSImage(contentsOf: url)
-            imageView.animates = true
+            if url.isFileURL {
+                imageView.image = NSImage(contentsOf: url)
+                imageView.animates = true
+                return
+            }
+            if let cached = AnimatedImageView.remoteCache.object(forKey: url as NSURL) {
+                imageView.image = cached
+                imageView.animates = true
+                return
+            }
+
+            imageView.image = nil
+            var request = URLRequest(url: url)
+            request.cachePolicy = .returnCacheDataElseLoad
+            dataTask = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+                guard let data else { return }
+                DispatchQueue.main.async {
+                    guard let self, self.currentURL == url, let image = NSImage(data: data) else { return }
+                    AnimatedImageView.remoteCache.setObject(image, forKey: url as NSURL)
+                    self.imageView?.image = image
+                    self.imageView?.animates = true
+                }
+            }
+            dataTask?.resume()
+        }
+
+        deinit {
+            dataTask?.cancel()
         }
     }
 }

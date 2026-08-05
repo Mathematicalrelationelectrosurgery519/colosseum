@@ -511,6 +511,7 @@ struct ArenaBrowserView: View {
                                     ArenaRemoteCell(
                                         item: item,
                                         isHovering: hoveringItemID == item.id,
+                                        isSelected: entry.id == gridFocusID && isBrowsingGrid,
                                         hoverPlayer: hoveringItemID == item.id ? hoverVideo : nil
                                     )
                                 }
@@ -789,6 +790,15 @@ struct ArenaBrowserView: View {
     }
 
     private func handleHover(item: ArenaContentItem, hovering: Bool) {
+        if item.isAnimatedImage {
+            if hovering {
+                stopHover()
+                hoveringItemID = item.id
+            } else if hoveringItemID == item.id {
+                stopHover()
+            }
+            return
+        }
         guard (item.isVideo || item.isAudio),
               let urlString = item.attachmentURL,
               let url = URL(string: urlString)
@@ -889,12 +899,21 @@ struct ArenaBrowserView: View {
 struct ArenaRemoteCell: View {
     let item: ArenaContentItem
     var isHovering: Bool
+    var isSelected: Bool = false
     var hoverPlayer: LoopingVideoPlayer?
+
+    private var wantsPlayback: Bool { isHovering || isSelected }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if item.isVideo, isHovering, let hoverPlayer {
+                if item.isAnimatedImage,
+                   wantsPlayback,
+                   let urlString = item.imageURL ?? item.attachmentURL,
+                   let url = URL(string: urlString) {
+                    AnimatedImageView(url: url)
+                        .allowsHitTesting(false)
+                } else if item.isVideo, isHovering, let hoverPlayer {
                     PlayerView(player: hoverPlayer.player, showsControls: false)
                         .allowsHitTesting(false)
                 } else if item.isAudio {
@@ -1201,6 +1220,12 @@ private struct ArenaRemoteItemView: View {
                             }
                         }
                         .padding(40)
+                    } else if item.isAnimatedImage,
+                              let urlString = item.imageURL ?? item.attachmentURL,
+                              let url = URL(string: urlString) {
+                        AnimatedImageView(url: url)
+                            .padding(24)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if let urlString = item.imageURL ?? item.gridImageURL,
                               let url = URL(string: urlString) {
                         ShimmerRemoteImage(

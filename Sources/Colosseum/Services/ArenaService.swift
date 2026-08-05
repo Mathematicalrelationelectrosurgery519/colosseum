@@ -79,6 +79,21 @@ struct ArenaContentItem: Sendable, Identifiable, Hashable {
         return false
     }
 
+    var isAnimatedImage: Bool {
+        guard kind == .image || kind == .attachment else { return false }
+        if AnimatedImage.isGIF(mimeType: imageMime ?? attachmentMime) { return true }
+        if let filename = imageFilename ?? attachmentFilename,
+           AnimatedImage.isGIF(pathExtension: URL(fileURLWithPath: filename).pathExtension) {
+            return true
+        }
+        if let urlString = imageURL ?? attachmentURL,
+           let url = URL(string: urlString),
+           AnimatedImage.isGIF(url: url) {
+            return true
+        }
+        return false
+    }
+
     /// Best URL for a full remote preview (original image, video file, or link).
     var previewURL: String? {
         if isVideo || isAudio { return attachmentURL }

@@ -69,9 +69,14 @@ struct MediaBlockCell: View {
                 .opacity(videoSession.isReady ? 1 : 0)
                 .transaction { $0.animation = nil }
                 .allowsHitTesting(false)
-            } else if shouldPlayGIF, let path = block.localRelativePath {
-                AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
-                    .allowsHitTesting(false)
+            } else if shouldPlayGIF {
+                if let path = block.localRelativePath {
+                    AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
+                        .allowsHitTesting(false)
+                } else if let urlString = block.remoteMediaURL, let url = URL(string: urlString) {
+                    AnimatedImageView(url: url)
+                        .allowsHitTesting(false)
+                }
             }
 
             if block.kind == .video, !shouldPlayVideo {

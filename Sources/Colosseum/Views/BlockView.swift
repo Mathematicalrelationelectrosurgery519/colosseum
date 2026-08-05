@@ -245,10 +245,16 @@ struct BlockView: View {
                 }
             } else if let urlString = block.remoteMediaURL ?? block.remoteThumbnailURL,
                       let url = URL(string: urlString) {
-                ShimmerRemoteImage(url: url, square: false, contentPadding: 24) {
-                    remoteMediaPlaceholder("Couldn’t load image")
+                if block.isAnimatedImage {
+                    AnimatedImageView(url: url)
+                        .padding(24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ShimmerRemoteImage(url: url, square: false, contentPadding: 24) {
+                        remoteMediaPlaceholder("Couldn’t load image")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         case .video:
             if let loopingPlayer {
