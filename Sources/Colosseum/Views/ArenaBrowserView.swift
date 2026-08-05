@@ -1278,11 +1278,8 @@ private struct ArenaRemoteItemView: View {
                     }
                 }
                 }
-                .id(item.id)
-                .transition(ColosseumMotion.fade)
             }
         }
-        .animation(ColosseumMotion.standard, value: selected?.id)
     }
 
     private var sidebar: some View {

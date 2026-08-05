@@ -145,7 +145,6 @@ struct RemoteAnimatedImageView: View {
             ) {
                 Color.clear
             }
-            .opacity(isReady ? 0 : 1)
 
             AnimatedImageView(url: url) {
                 isReady = true
