@@ -74,7 +74,11 @@ struct MediaBlockCell: View {
                     AnimatedImageView(url: MediaLibrary.absoluteURL(relativePath: path))
                         .allowsHitTesting(false)
                 } else if let urlString = block.remoteMediaURL, let url = URL(string: urlString) {
-                    AnimatedImageView(url: url)
+                    RemoteAnimatedImageView(
+                        url: url,
+                        placeholderURL: block.remoteThumbnailURL.flatMap(URL.init(string:)),
+                        square: true
+                    )
                         .allowsHitTesting(false)
                 }
             }

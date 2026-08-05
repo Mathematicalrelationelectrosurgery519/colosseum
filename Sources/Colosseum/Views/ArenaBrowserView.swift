@@ -911,7 +911,11 @@ struct ArenaRemoteCell: View {
                    wantsPlayback,
                    let urlString = item.imageURL ?? item.attachmentURL,
                    let url = URL(string: urlString) {
-                    AnimatedImageView(url: url)
+                    RemoteAnimatedImageView(
+                        url: url,
+                        placeholderURL: item.gridImageURL.flatMap(URL.init(string:)),
+                        square: true
+                    )
                         .allowsHitTesting(false)
                 } else if item.isVideo, isHovering, let hoverPlayer {
                     PlayerView(player: hoverPlayer.player, showsControls: false)
@@ -1189,7 +1193,8 @@ private struct ArenaRemoteItemView: View {
         ZStack {
             Color.black
             if let item {
-                switch item.kind {
+                Group {
+                    switch item.kind {
                 case .image, .link, .attachment, .other:
                     if item.isVideo {
                         ZStack {
@@ -1223,9 +1228,11 @@ private struct ArenaRemoteItemView: View {
                     } else if item.isAnimatedImage,
                               let urlString = item.imageURL ?? item.attachmentURL,
                               let url = URL(string: urlString) {
-                        AnimatedImageView(url: url)
-                            .padding(24)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        RemoteAnimatedImageView(
+                            url: url,
+                            placeholderURL: item.gridImageURL.flatMap(URL.init(string:)),
+                            contentPadding: 24
+                        )
                     } else if let urlString = item.imageURL ?? item.gridImageURL,
                               let url = URL(string: urlString) {
                         ShimmerRemoteImage(
@@ -1270,8 +1277,12 @@ private struct ArenaRemoteItemView: View {
                         }
                     }
                 }
+                }
+                .id(item.id)
+                .transition(ColosseumMotion.fade)
             }
         }
+        .animation(ColosseumMotion.standard, value: selected?.id)
     }
 
     private var sidebar: some View {

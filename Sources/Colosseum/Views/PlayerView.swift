@@ -10,6 +10,7 @@ import SwiftUI
 struct AnimatedImageView: NSViewRepresentable {
     let url: URL
     var imageScaling: NSImageScaling = .scaleProportionallyUpOrDown
+    var onLoad: () -> Void = {}
 
     private static let remoteCache = NSCache<NSURL, NSImage>()
 
@@ -36,12 +37,14 @@ struct AnimatedImageView: NSViewRepresentable {
             imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         context.coordinator.imageView = imageView
+        context.coordinator.onLoad = onLoad
         context.coordinator.load(url: url)
         return container
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.imageView?.imageScaling = imageScaling
+        context.coordinator.onLoad = onLoad
         if context.coordinator.currentURL != url {
             context.coordinator.load(url: url)
         } else {
@@ -72,21 +75,26 @@ struct AnimatedImageView: NSViewRepresentable {
     final class Coordinator {
         var currentURL: URL?
         weak var imageView: NSImageView?
+        var onLoad: () -> Void = {}
         private var dataTask: URLSessionDataTask?
+        private var didNotifyLoad = false
 
         func load(url: URL) {
             dataTask?.cancel()
             dataTask = nil
+            didNotifyLoad = false
             currentURL = url
             guard let imageView else { return }
             if url.isFileURL {
                 imageView.image = NSImage(contentsOf: url)
                 imageView.animates = true
+                notifyLoaded()
                 return
             }
             if let cached = AnimatedImageView.remoteCache.object(forKey: url as NSURL) {
                 imageView.image = cached
                 imageView.animates = true
+                notifyLoaded()
                 return
             }
 
@@ -100,6 +108,7 @@ struct AnimatedImageView: NSViewRepresentable {
                     AnimatedImageView.remoteCache.setObject(image, forKey: url as NSURL)
                     self.imageView?.image = image
                     self.imageView?.animates = true
+                    self.notifyLoaded()
                 }
             }
             dataTask?.resume()
@@ -108,6 +117,45 @@ struct AnimatedImageView: NSViewRepresentable {
         deinit {
             dataTask?.cancel()
         }
+
+        private func notifyLoaded() {
+            guard !didNotifyLoad else { return }
+            didNotifyLoad = true
+            DispatchQueue.main.async { [weak self] in self?.onLoad() }
+        }
+    }
+}
+
+/// Keeps a static remote frame visible until the animated image has decoded.
+struct RemoteAnimatedImageView: View {
+    let url: URL
+    var placeholderURL: URL?
+    var square = false
+    var contentPadding: CGFloat = 0
+
+    @State private var isReady = false
+
+    var body: some View {
+        ZStack {
+            ShimmerRemoteImage(
+                url: placeholderURL ?? url,
+                square: square,
+                showsBorder: false,
+                contentPadding: contentPadding
+            ) {
+                Color.clear
+            }
+            .opacity(isReady ? 0 : 1)
+
+            AnimatedImageView(url: url) {
+                isReady = true
+            }
+            .padding(contentPadding)
+            .opacity(isReady ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: square ? nil : .infinity)
+        .animation(ColosseumMotion.standard, value: isReady)
+        .onChange(of: url) { _, _ in isReady = false }
     }
 }
 

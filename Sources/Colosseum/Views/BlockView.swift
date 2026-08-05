@@ -246,9 +246,11 @@ struct BlockView: View {
             } else if let urlString = block.remoteMediaURL ?? block.remoteThumbnailURL,
                       let url = URL(string: urlString) {
                 if block.isAnimatedImage {
-                    AnimatedImageView(url: url)
-                        .padding(24)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    RemoteAnimatedImageView(
+                        url: url,
+                        placeholderURL: block.remoteThumbnailURL.flatMap(URL.init(string:)),
+                        contentPadding: 24
+                    )
                 } else {
                     ShimmerRemoteImage(url: url, square: false, contentPadding: 24) {
                         remoteMediaPlaceholder("Couldn’t load image")
