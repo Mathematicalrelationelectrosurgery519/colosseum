@@ -1063,8 +1063,9 @@ private struct ArenaRemoteItemView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let item {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
                         if !item.notes.isEmpty {
                             Text(item.notes)
                                 .font(.system(size: 13))
@@ -1112,11 +1113,18 @@ private struct ArenaRemoteItemView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 4)
 
-                        remoteConnectionsSection
+                            remoteConnectionsSection
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .padding(.bottom, 24)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .padding(.bottom, 24)
+                    .onChange(of: connectionFocusIndex) { _, index in
+                        guard let index, remoteConnections.indices.contains(index) else { return }
+                        withAnimation(ColosseumMotion.soft) {
+                            proxy.scrollTo(remoteConnections[index].id, anchor: .center)
+                        }
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -1189,6 +1197,7 @@ private struct ArenaRemoteItemView: View {
                     }
                     .buttonStyle(.plain)
                     .pointingHandCursor()
+                    .id(connection.id)
                     .animation(ColosseumMotion.soft, value: isFocused)
                 }
             }
