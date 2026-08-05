@@ -111,8 +111,12 @@ struct BlockView: View {
             reloadPlayer()
             Task { await loadRemoteConnections() }
         }
-        .onChange(of: showConnect) { _, _ in
-            installKeyMonitor()
+        .onChange(of: showConnect) { _, isPresented in
+            if isPresented {
+                keyMonitor.remove()
+            } else {
+                installKeyMonitor()
+            }
         }
         .onExitCommand(perform: handleEscape)
         .onKeyPress(.escape) {

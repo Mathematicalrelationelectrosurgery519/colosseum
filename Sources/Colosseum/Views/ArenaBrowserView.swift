@@ -271,8 +271,12 @@ struct ArenaBrowserView: View {
                 keyMonitor.remove()
             }
         }
-        .onChange(of: showConnect) { _, _ in
-            installKeyMonitor()
+        .onChange(of: showConnect) { _, isPresented in
+            if isPresented {
+                keyMonitor.remove()
+            } else {
+                installKeyMonitor()
+            }
         }
         .onChange(of: showBoardSearch) { _, searching in
             if !searching, selectedItem == nil {
@@ -1087,8 +1091,12 @@ private struct ArenaRemoteItemView: View {
             reloadPlayer()
             Task { await loadConnections() }
         }
-        .onChange(of: showConnect) { _, _ in
-            installKeyMonitor()
+        .onChange(of: showConnect) { _, isPresented in
+            if isPresented {
+                keyMonitor.remove()
+            } else {
+                installKeyMonitor()
+            }
         }
         .onExitCommand(perform: handleEscape)
         .onKeyPress(.escape) {

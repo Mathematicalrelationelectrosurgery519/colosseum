@@ -3,6 +3,16 @@ import AppKit
 /// Local key monitor that survives SwiftUI view value semantics.
 @MainActor
 final class KeyNavMonitor {
+    private final class WeakMonitor {
+        weak var value: KeyNavMonitor?
+
+        init(_ value: KeyNavMonitor) {
+            self.value = value
+        }
+    }
+
+    private static var monitorStacks: [ObjectIdentifier: [WeakMonitor]] = [:]
+
     var onLeft: (() -> Void)?
     var onRight: (() -> Void)?
     var onUp: (() -> Void)?
@@ -24,11 +34,23 @@ final class KeyNavMonitor {
     var shouldIgnoreNavigation: (() -> Bool)?
 
     private var monitor: Any?
+    private weak var ownerWindow: NSWindow?
+    private var ownerWindowID: ObjectIdentifier?
 
     func install() {
         remove()
+        ownerWindow = NSApp.keyWindow
+        if let ownerWindow {
+            let id = ObjectIdentifier(ownerWindow)
+            ownerWindowID = id
+            var stack = Self.monitorStacks[id, default: []]
+            stack.removeAll { $0.value == nil || $0.value === self }
+            stack.append(WeakMonitor(self))
+            Self.monitorStacks[id] = stack
+        }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            guard self.owns(event) else { return event }
             if event.keyCode == 48,
                !event.modifierFlags.contains(.shift),
                let onTab = self.onTab,
@@ -36,11 +58,6 @@ final class KeyNavMonitor {
                 return nil
             }
             if Self.isEditingText, !self.capturesNavigationWhileEditing {
-                // Still allow Esc to dismiss even from text.
-                if event.keyCode == 53 {
-                    DispatchQueue.main.async { self.onEscape?() }
-                    return nil
-                }
                 return event
             }
             if self.shouldIgnoreNavigation?() == true {
@@ -124,6 +141,7 @@ final class KeyNavMonitor {
             NSEvent.removeMonitor(monitor)
             self.monitor = nil
         }
+        unregisterOwner()
     }
 
     deinit {
@@ -138,5 +156,28 @@ final class KeyNavMonitor {
         if responder is NSTextView { return true }
         if responder is NSText { return true }
         return false
+    }
+
+    private func owns(_ event: NSEvent) -> Bool {
+        guard let ownerWindow, let ownerWindowID else { return true }
+        let eventWindow = event.window ?? NSApp.keyWindow
+        guard eventWindow === ownerWindow else { return false }
+
+        var stack = Self.monitorStacks[ownerWindowID] ?? []
+        stack.removeAll { $0.value == nil }
+        Self.monitorStacks[ownerWindowID] = stack.isEmpty ? nil : stack
+        return stack.last?.value === self
+    }
+
+    private func unregisterOwner() {
+        guard let ownerWindowID else {
+            ownerWindow = nil
+            return
+        }
+        var stack = Self.monitorStacks[ownerWindowID] ?? []
+        stack.removeAll { $0.value == nil || $0.value === self }
+        Self.monitorStacks[ownerWindowID] = stack.isEmpty ? nil : stack
+        self.ownerWindowID = nil
+        ownerWindow = nil
     }
 }

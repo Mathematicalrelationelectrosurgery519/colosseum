@@ -420,6 +420,10 @@ final class TagAwareTextView: NSTextView {
 
     override func doCommand(by selector: Selector) {
         if onSuggestCommand?(selector) == true { return }
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
+            window?.makeFirstResponder(nil)
+            return
+        }
         super.doCommand(by: selector)
     }
 
